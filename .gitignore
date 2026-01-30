@@ -1,0 +1,14 @@
+# Ignore compiled binaries
+*.ex5
+*.ex4
+
+# Ignore logs and temp files
+/Logs/
+/Files/
+/Images/
+*.log
+*.dat
+
+# Ignore profiles and tester cache
+/Profiles/
+/Tester/
