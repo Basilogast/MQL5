@@ -3,7 +3,7 @@
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version   "1.01" // Updated version for telemetry
+#property version   "1.02" 
 #property strict
 
 // 1. INCLUDE THE TRADE CLASS
@@ -11,18 +11,19 @@
 
 // 2. INPUT PARAMETERS (Optimization Ready)
 input group "Indicator Settings"
-input int      FastMAPeriod = 9;      // Fast EMA [cite: 3]
-input int      SlowMAPeriod = 21;     // Slow EMA [cite: 4]
-input int      TrendMAPeriod = 200;   // Trend Filter (EMA 200) [cite: 5]
+input int      FastMAPeriod = 9;
+input int      SlowMAPeriod = 21;
+input int      TrendMAPeriod = 200;
 
 input group "Risk Management"
-input double   StopLossPips = 200;    // Stop Loss in Points [cite: 6]
-input double   TakeProfitPips = 400;  // Take Profit in Points [cite: 7]
-input double   LotSize      = 0.1;    // Trade Volume [cite: 8]
+input double   StopLossPips = 200;
+input double   TakeProfitPips = 400;
+input double   LotSize      = 0.1;
+input int      TrailingPips = 100; // New: Distance to trail in points
 
 // 3. GLOBAL VARIABLES
 int    FastHandle, SlowHandle, TrendHandle;
-CTrade trade; // The "Hands" of the script
+CTrade trade;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -50,6 +51,25 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   // --- MINIMAL CHANGE: Trailing Stop Logic (Every Tick) ---
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetSymbol(i) == _Symbol)
+      {
+         ulong  ticket = PositionGetInteger(POSITION_TICKET);
+         double current_sl = PositionGetDouble(POSITION_SL);
+         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double new_sl = bid - (TrailingPips * _Point);
+
+         // Only modify if new_sl is higher than current_sl (Locking in profit)
+         if(new_sl > current_sl + (_Point * 10)) 
+         {
+            trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
+         }
+      }
+   }
+   // --- End of Trailing Stop ---
+
    if(!IsNewBar()) return;
 
    double FastEMA[], SlowEMA[], TrendEMA[];
@@ -63,7 +83,7 @@ void OnTick()
 
    bool BuyCondition = (FastEMA[2] < SlowEMA[2]) && (FastEMA[1] > SlowEMA[1]);
    bool TrendFilter  = (iClose(_Symbol, _Period, 1) > TrendEMA[1]);
-   // TELEMETRY: This prints every time a new bar starts 
+   
    Print("New Bar - Checking Signal: Fast[1]=", FastEMA[1], " Slow[1]=", SlowEMA[1], " Close[1]=", iClose(_Symbol, _Period, 1));
 
    if(PositionsTotal() < 1) 
