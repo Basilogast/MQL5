@@ -3,13 +3,11 @@
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version   "1.02" 
+#property version   "1.03" 
 #property strict
 
-// 1. INCLUDE THE TRADE CLASS
 #include <Trade\Trade.mqh>
 
-// 2. INPUT PARAMETERS (Optimization Ready)
 input group "Indicator Settings"
 input int      FastMAPeriod = 9;
 input int      SlowMAPeriod = 21;
@@ -19,19 +17,15 @@ input group "Risk Management"
 input double   StopLossPips = 200;
 input double   TakeProfitPips = 400;
 input double   LotSize      = 0.1;
-input int      TrailingPips = 100; // New: Distance to trail in points
+input int      TrailingPips = 100;
+input int      BreakEvenPips = 150; // New: Points in profit to trigger Break Even
 
-// 3. GLOBAL VARIABLES
 int    FastHandle, SlowHandle, TrendHandle;
 CTrade trade;
 
-//+------------------------------------------------------------------+
-//| Expert initialization function                                   |
-//+------------------------------------------------------------------+
 int OnInit()
 {
    trade.SetExpertMagicNumber(123456);
-
    FastHandle  = iMA(_Symbol, _Period, FastMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    SlowHandle  = iMA(_Symbol, _Period, SlowMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    TrendHandle = iMA(_Symbol, _Period, TrendMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
@@ -41,34 +35,35 @@ int OnInit()
       Print("Error initializing handles");
       return(INIT_FAILED);
    }
-
-   Print("EA Initialized Successfully: ", _Symbol, " ", _Period);
    return(INIT_SUCCEEDED);
 }
 
-//+------------------------------------------------------------------+
-//| Expert tick function                                             |
-//+------------------------------------------------------------------+
 void OnTick()
 {
-   // --- MINIMAL CHANGE: Trailing Stop Logic (Every Tick) ---
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(PositionGetSymbol(i) == _Symbol)
       {
          ulong  ticket = PositionGetInteger(POSITION_TICKET);
          double current_sl = PositionGetDouble(POSITION_SL);
+         double open_price = PositionGetDouble(POSITION_PRICE_OPEN); // New: Entry Price
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double new_sl = bid - (TrailingPips * _Point);
+         
+         // 1. MINIMAL CHANGE: Break Even Logic
+         if(current_sl < open_price && bid >= open_price + (BreakEvenPips * _Point))
+         {
+            trade.PositionModify(ticket, open_price + (10 * _Point), PositionGetDouble(POSITION_TP));
+            Print(">> Break Even Activated");
+         }
 
-         // Only modify if new_sl is higher than current_sl (Locking in profit)
+         // 2. Trailing Stop Logic
+         double new_sl = bid - (TrailingPips * _Point);
          if(new_sl > current_sl + (_Point * 10)) 
          {
             trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
          }
       }
    }
-   // --- End of Trailing Stop ---
 
    if(!IsNewBar()) return;
 
@@ -83,18 +78,10 @@ void OnTick()
 
    bool BuyCondition = (FastEMA[2] < SlowEMA[2]) && (FastEMA[1] > SlowEMA[1]);
    bool TrendFilter  = (iClose(_Symbol, _Period, 1) > TrendEMA[1]);
-   
-   Print("New Bar - Checking Signal: Fast[1]=", FastEMA[1], " Slow[1]=", SlowEMA[1], " Close[1]=", iClose(_Symbol, _Period, 1));
 
-   if(PositionsTotal() < 1) 
+   if(PositionsTotal() < 1 && BuyCondition && TrendFilter)
    {
-      if(BuyCondition)
-      {
-         Print(">> Strategy Trigger: EMA Crossover detected.");
-         
-         if(TrendFilter)
-         {
-            Print(">> Trend Filter Passed: Price is above EMA 200. Executing Buy...");
+      Print(">> Trend Filter Passed: Price is above EMA 200. Executing Buy...");
             
             double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
             double sl  = ask - (StopLossPips * _Point);
@@ -104,18 +91,9 @@ void OnTick()
                Print(">> SUCCESS: Buy order placed at ", ask);
             else
                Print(">> ERROR: Order failed. Code: ", GetLastError());
-         }
-         else 
-         {
-            Print(">> BLOCK: Crossover detected but Trend is Bearish (Price < EMA 200).");
-         }
-      }
    }
 }
 
-//+------------------------------------------------------------------+
-//| Helper: Check for New Bar                                        |
-//+------------------------------------------------------------------+
 bool IsNewBar()
 {
    static datetime last_time=0;
