@@ -3,44 +3,108 @@
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version   "1.03" 
+#property version   "1.05" 
 #property strict
 
 #include <Trade\Trade.mqh>
 
-input group "Indicator Settings"
-input int      FastMAPeriod = 9;
-input int      SlowMAPeriod = 21;
+// 1. INDICATOR SETTINGS (LOCKED TO SWEET SPOT)
+input group "Indicator Settings (Robust Values)"
+input int      FastMAPeriod = 6;      // Hardcoded Robust Fast EMA
+input int      SlowMAPeriod = 86;     // Hardcoded Robust Slow EMA
 input int      TrendMAPeriod = 200;
 
+// 2. RISK MANAGEMENT (1% RISK PER TRADE)
 input group "Risk Management"
-input double   StopLossPips = 200;
+input double   RiskPercent  = 1.0;    // Risk 1% of account balance per trade
+input double   StopLossPips = 200;    // Used for lot size calculation
 input double   TakeProfitPips = 400;
-input double   LotSize      = 0.1;
-input int      TrailingPips = 100;
-input int      BreakEvenPips = 150;
+input int      TrailingPips = 100;    // To be optimized in final phase
+input int      BreakEvenPips = 150;   // To be optimized in final phase
 
 int    FastHandle, SlowHandle, TrendHandle;
 CTrade trade;
 
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
 int OnInit()
 {
    trade.SetExpertMagicNumber(123456);
+
    FastHandle  = iMA(_Symbol, _Period, FastMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    SlowHandle  = iMA(_Symbol, _Period, SlowMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    TrendHandle = iMA(_Symbol, _Period, TrendMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
 
    if(FastHandle == INVALID_HANDLE || SlowHandle == INVALID_HANDLE || TrendHandle == INVALID_HANDLE)
-   {
-      Print("Error initializing handles");
       return(INIT_FAILED);
-   }
+
    return(INIT_SUCCEEDED);
 }
 
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
 void OnTick()
 {
-   // --- POSITION MANAGEMENT: Optimization Logic ---
+   // Manage existing trades (Trailing Stop and Break Even)
+   ManageOpenPositions();
+
+   if(!IsNewBar()) return;
+
+   double FastEMA[], SlowEMA[], TrendEMA[];
+   ArraySetAsSeries(FastEMA, true);
+   ArraySetAsSeries(SlowEMA, true);
+   ArraySetAsSeries(TrendEMA, true);
+
+   if(CopyBuffer(FastHandle, 0, 0, 3, FastEMA) < 3 || 
+      CopyBuffer(SlowHandle, 0, 0, 3, SlowEMA) < 3 || 
+      CopyBuffer(TrendHandle, 0, 0, 3, TrendEMA) < 3) return;
+
+   // Entry Logic
+   bool BuyCondition = (FastEMA[2] < SlowEMA[2]) && (FastEMA[1] > SlowEMA[1]);
+   bool TrendFilter  = (iClose(_Symbol, _Period, 1) > TrendEMA[1]);
+
+   if(PositionsTotal() < 1 && BuyCondition && TrendFilter) 
+   {
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double sl_price = ask - (StopLossPips * _Point);
+      double tp_price = ask + (TakeProfitPips * _Point);
+      
+      // Calculate Lot Size based on 1% Risk
+      double lot = CalculateLotSize(StopLossPips); 
+      
+      trade.Buy(lot, _Symbol, ask, sl_price, tp_price, "EMA Cross Robust 6-86");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Lot Size based on Account Risk                         |
+//+------------------------------------------------------------------+
+double CalculateLotSize(double sl_pips)
+{
+   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double risk_amount = balance * (RiskPercent / 100.0);
+   
+   // Formula: Risk Amount / (Stop Loss in Points * Tick Value)
+   double lot = risk_amount / (sl_pips * 10 * tick_value); 
+   
+   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   
+   lot = NormalizeDouble(lot, 2);
+   if(lot < min_lot) lot = min_lot;
+   if(lot > max_lot) lot = max_lot;
+   
+   return lot;
+}
+
+//+------------------------------------------------------------------+
+//| Manage Open Positions: BE and Trailing Stop                      |
+//+------------------------------------------------------------------+
+void ManageOpenPositions()
+{
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(PositionGetSymbol(i) == _Symbol)
@@ -64,33 +128,16 @@ void OnTick()
          }
       }
    }
-
-   if(!IsNewBar()) return;
-
-   double FastEMA[], SlowEMA[], TrendEMA[];
-   ArraySetAsSeries(FastEMA, true);
-   ArraySetAsSeries(SlowEMA, true);
-   ArraySetAsSeries(TrendEMA, true);
-
-   if(CopyBuffer(FastHandle, 0, 0, 3, FastEMA) < 3) return;
-   if(CopyBuffer(SlowHandle, 0, 0, 3, SlowEMA) < 3) return;
-   if(CopyBuffer(TrendHandle, 0, 0, 3, TrendEMA) < 3) return;
-
-   bool BuyCondition = (FastEMA[2] < SlowEMA[2]) && (FastEMA[1] > SlowEMA[1]);
-   bool TrendFilter  = (iClose(_Symbol, _Period, 1) > TrendEMA[1]);
-
-   if(PositionsTotal() < 1 && BuyCondition && TrendFilter) 
-   {
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      trade.Buy(LotSize, _Symbol, ask, ask-(StopLossPips*_Point), ask+(TakeProfitPips*_Point), "EMA Cross V1");
-   }
 }
 
-bool IsNewBar()
-{
-   static datetime last_time=0;
-   datetime lastbar_time=(datetime)SeriesInfoInteger(_Symbol,_Period,SERIES_LASTBAR_DATE);
-   if(last_time==lastbar_time) return(false);
-   last_time=lastbar_time;
-   return(true);
+//+------------------------------------------------------------------+
+//| Check for New Bar                                                |
+//+------------------------------------------------------------------+
+bool IsNewBar() 
+{ 
+   static datetime last; 
+   datetime cur=(datetime)SeriesInfoInteger(_Symbol,_Period,SERIES_LASTBAR_DATE); 
+   if(last==cur) return false; 
+   last=cur; 
+   return true; 
 }
