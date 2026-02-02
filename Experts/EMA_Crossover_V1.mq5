@@ -18,7 +18,7 @@ input double   StopLossPips = 200;
 input double   TakeProfitPips = 400;
 input double   LotSize      = 0.1;
 input int      TrailingPips = 100;
-input int      BreakEvenPips = 150; // New: Points in profit to trigger Break Even
+input int      BreakEvenPips = 150;
 
 int    FastHandle, SlowHandle, TrendHandle;
 CTrade trade;
@@ -40,20 +40,20 @@ int OnInit()
 
 void OnTick()
 {
+   // --- POSITION MANAGEMENT: Optimization Logic ---
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(PositionGetSymbol(i) == _Symbol)
       {
          ulong  ticket = PositionGetInteger(POSITION_TICKET);
          double current_sl = PositionGetDouble(POSITION_SL);
-         double open_price = PositionGetDouble(POSITION_PRICE_OPEN); // New: Entry Price
+         double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          
-         // 1. MINIMAL CHANGE: Break Even Logic
+         // 1. Break Even Logic
          if(current_sl < open_price && bid >= open_price + (BreakEvenPips * _Point))
          {
             trade.PositionModify(ticket, open_price + (10 * _Point), PositionGetDouble(POSITION_TP));
-            Print(">> Break Even Activated");
          }
 
          // 2. Trailing Stop Logic
@@ -79,18 +79,10 @@ void OnTick()
    bool BuyCondition = (FastEMA[2] < SlowEMA[2]) && (FastEMA[1] > SlowEMA[1]);
    bool TrendFilter  = (iClose(_Symbol, _Period, 1) > TrendEMA[1]);
 
-   if(PositionsTotal() < 1 && BuyCondition && TrendFilter)
+   if(PositionsTotal() < 1 && BuyCondition && TrendFilter) 
    {
-      Print(">> Trend Filter Passed: Price is above EMA 200. Executing Buy...");
-            
-            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-            double sl  = ask - (StopLossPips * _Point);
-            double tp  = ask + (TakeProfitPips * _Point);
-
-            if(trade.Buy(LotSize, _Symbol, ask, sl, tp, "EMA Cross V1"))
-               Print(">> SUCCESS: Buy order placed at ", ask);
-            else
-               Print(">> ERROR: Order failed. Code: ", GetLastError());
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      trade.Buy(LotSize, _Symbol, ask, ask-(StopLossPips*_Point), ask+(TakeProfitPips*_Point), "EMA Cross V1");
    }
 }
 
