@@ -3,13 +3,13 @@
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "1.09" // Version updated
+#property version "1.12" // Version updated
 #property strict
 
 #include <Trade\Trade.mqh>
 
 input group "Indicator Settings" 
-input int FastMAPeriod = 6;  // Now used for Hull Logic (Faster)
+input int FastMAPeriod = 6;  
 input int SlowMAPeriod = 86;
 input int TrendMAPeriod = 200;
 
@@ -24,27 +24,32 @@ input double TakeProfitPips = 400;
 input int TrailingPips = 240;
 input int BreakEvenPips = 200;
 
-//--- New Input for Slope Sensitivity (Optional, default matches recommendation)
 input group "Slope Filter"
-input double MinSlope = 0.00020; // Minimum rise in EMA 86 value to confirm trend
+input double MinSlope = 0.00020; 
 
-int FastHandle, SlowHandle, TrendHandle, ADXHandle;
+//--- UPDATED: Removed Distance, Kept RSI
+input group "RSI Filter (Anti-Spike)"
+input int RSI_Period = 14;     
+input int RSI_Overbought = 70; // Don't buy if RSI is above this level
+
+int FastHandle, SlowHandle, TrendHandle, ADXHandle, RSIHandle;
 CTrade trade;
 
 int OnInit()
 {
    trade.SetExpertMagicNumber(123456);
 
-   //--- We use MODE_SMMA here as a base for faster responsiveness in this logic
    FastHandle = iMA(_Symbol, _Period, FastMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    SlowHandle = iMA(_Symbol, _Period, SlowMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    TrendHandle = iMA(_Symbol, _Period, TrendMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    ADXHandle = iADX(_Symbol, _Period, ADX_Period);
+   RSIHandle = iRSI(_Symbol, _Period, RSI_Period, PRICE_CLOSE); // RSI Init
 
    return (FastHandle == INVALID_HANDLE || SlowHandle == INVALID_HANDLE ||
-                   TrendHandle == INVALID_HANDLE || ADXHandle == INVALID_HANDLE
-               ? INIT_FAILED
-               : INIT_SUCCEEDED);
+           TrendHandle == INVALID_HANDLE || ADXHandle == INVALID_HANDLE ||
+           RSIHandle == INVALID_HANDLE
+           ? INIT_FAILED
+           : INIT_SUCCEEDED);
 }
 
 void OnTick()
@@ -53,46 +58,45 @@ void OnTick()
    if (!IsNewBar())
       return;
 
-   double FastEMA[], SlowEMA[], TrendEMA[], ADXValues[], PriceClose[];
+   double FastEMA[], SlowEMA[], TrendEMA[], ADXValues[], RSIValues[], PriceClose[];
    ArraySetAsSeries(FastEMA, true);
    ArraySetAsSeries(SlowEMA, true);
    ArraySetAsSeries(TrendEMA, true);
    ArraySetAsSeries(ADXValues, true);
+   ArraySetAsSeries(RSIValues, true);
    ArraySetAsSeries(PriceClose, true);
 
-   //--- STEP A: Update CopyBuffer to look back 10 bars (needed for Slope calculation)
    if (CopyBuffer(FastHandle, 0, 0, 10, FastEMA) < 10 ||
        CopyBuffer(SlowHandle, 0, 0, 10, SlowEMA) < 10 ||
        CopyBuffer(TrendHandle, 0, 0, 10, TrendEMA) < 10 ||
        CopyBuffer(ADXHandle, 0, 0, 10, ADXValues) < 10 ||
+       CopyBuffer(RSIHandle, 0, 0, 10, RSIValues) < 10 || 
        CopyClose(_Symbol, _Period, 0, 10, PriceClose) < 10)
       return;
 
-   //--- EARLY ENTRY LOGIC: Price Crosses Fast EMA
+   //--- LOGIC
    bool PriceCrossFast = (PriceClose[2] < FastEMA[2]) && (PriceClose[1] > FastEMA[1]);
    bool EMA_Alignment = (FastEMA[1] > SlowEMA[1]);
    bool TrendFilter = (PriceClose[1] > TrendEMA[1]);
    bool StrongTrend = (ADXValues[1] > ADX_Threshold);
 
-   //--- STEP B: Slope Filter Logic
-   // Calculate difference between Slow EMA now (index 1) and 5 bars ago (index 6)
-   double CurrentSlowMA = SlowEMA[1];
-   double OldSlowMA     = SlowEMA[6]; 
-   double SlopeDiff     = CurrentSlowMA - OldSlowMA;
-
-   // Check if the slope is steep enough
+   //--- SLOPE FILTER
+   double SlopeDiff = SlowEMA[1] - SlowEMA[6];
    bool GoodSlope = (SlopeDiff > MinSlope);
 
-   //--- STEP C: Add GoodSlope to the Entry Condition
-   if (PositionsTotal() < 1 && PriceCrossFast && EMA_Alignment && TrendFilter && StrongTrend && GoodSlope)
+   //--- RSI FILTER (Replaces Max Distance)
+   // If RSI is > 70, market is exhausted. We wait for a cooldown.
+   bool NotOverbought = (RSIValues[1] < RSI_Overbought);
+
+   //--- ENTRY
+   if (PositionsTotal() < 1 && PriceCrossFast && EMA_Alignment && TrendFilter && StrongTrend && GoodSlope && NotOverbought)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double lot = CalculateLotSize(StopLossPips);
-      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "Early Entry V1.09 Slope");
+      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "Early Entry V1.12 RSI");
    }
 }
 
-//--- Lot Size and Management logic remains strictly identical to V1.06/V1.07
 double CalculateLotSize(double sl_pips)
 {
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
