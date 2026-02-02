@@ -1,37 +1,47 @@
 //+------------------------------------------------------------------+
 //|                                           EMA_Crossover_V1.mq5   |
+//|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version   "1.00"
+#property version   "1.01" // Updated version for telemetry
 #property strict
 
-// --- Inputs for Optimization
-input int      FastMAPeriod = 9;      // Fast EMA Period
-input int      SlowMAPeriod = 21;     // Slow EMA Period
-input int      TrendMAPeriod = 200;   // Trend Filter (EMA 200)
-input double   StopLossPips = 200;    // SL in Points
-input double   TakeProfitPips = 400;  // TP in Points
-input double   LotSize      = 0.1;    // Fixed Lot Size
+// 1. INCLUDE THE TRADE CLASS
+#include <Trade\Trade.mqh>
 
-// --- Global Variables
-int FastHandle, SlowHandle, TrendHandle;
+// 2. INPUT PARAMETERS (Optimization Ready)
+input group "Indicator Settings"
+input int      FastMAPeriod = 9;      // Fast EMA [cite: 3]
+input int      SlowMAPeriod = 21;     // Slow EMA [cite: 4]
+input int      TrendMAPeriod = 200;   // Trend Filter (EMA 200) [cite: 5]
+
+input group "Risk Management"
+input double   StopLossPips = 200;    // Stop Loss in Points [cite: 6]
+input double   TakeProfitPips = 400;  // Take Profit in Points [cite: 7]
+input double   LotSize      = 0.1;    // Trade Volume [cite: 8]
+
+// 3. GLOBAL VARIABLES
+int    FastHandle, SlowHandle, TrendHandle;
+CTrade trade; // The "Hands" of the script
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Link the indicators to "Handles" so the script can read them
+   trade.SetExpertMagicNumber(123456);
+
    FastHandle  = iMA(_Symbol, _Period, FastMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    SlowHandle  = iMA(_Symbol, _Period, SlowMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    TrendHandle = iMA(_Symbol, _Period, TrendMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
 
    if(FastHandle == INVALID_HANDLE || SlowHandle == INVALID_HANDLE || TrendHandle == INVALID_HANDLE)
    {
-      Print("Error: Failed to create indicator handles.");
-      return(INIT_FAILED); // This shuts down the EA safely
+      Print("Error initializing handles");
+      return(INIT_FAILED);
    }
-   
+
+   Print("EA Initialized Successfully: ", _Symbol, " ", _Period);
    return(INIT_SUCCEEDED);
 }
 
@@ -40,38 +50,51 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // 1. New Bar Check (The Filter)
    if(!IsNewBar()) return;
 
-   // 2. Data Buffers
    double FastEMA[], SlowEMA[], TrendEMA[];
    ArraySetAsSeries(FastEMA, true);
    ArraySetAsSeries(SlowEMA, true);
    ArraySetAsSeries(TrendEMA, true);
 
-   // 3. Copy indicator values to buffers
    if(CopyBuffer(FastHandle, 0, 0, 3, FastEMA) < 3) return;
    if(CopyBuffer(SlowHandle, 0, 0, 3, SlowEMA) < 3) return;
    if(CopyBuffer(TrendHandle, 0, 0, 3, TrendEMA) < 3) return;
 
-   // 4. LOGIC: Identify the Crossover on the PREVIOUSly closed candles
-   // Current Candle = Index 0 (Ignore)
-   // Last Closed Candle = Index 1
-   // Candle before last = Index 2
-   
    bool BuyCondition = (FastEMA[2] < SlowEMA[2]) && (FastEMA[1] > SlowEMA[1]);
    bool TrendFilter  = (iClose(_Symbol, _Period, 1) > TrendEMA[1]);
+   // TELEMETRY: This prints every time a new bar starts 
+   Print("New Bar - Checking Signal: Fast[1]=", FastEMA[1], " Slow[1]=", SlowEMA[1], " Close[1]=", iClose(_Symbol, _Period, 1));
 
-   // 5. Execution
-   if(BuyCondition && TrendFilter)
+   if(PositionsTotal() < 1) 
    {
-      Print("BUY SIGNAL: Fast EMA crossed above Slow EMA + Trend is Bullish");
-      // Execution Code (Step 4 will cover how to send the order safely)
+      if(BuyCondition)
+      {
+         Print(">> Strategy Trigger: EMA Crossover detected.");
+         
+         if(TrendFilter)
+         {
+            Print(">> Trend Filter Passed: Price is above EMA 200. Executing Buy...");
+            
+            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            double sl  = ask - (StopLossPips * _Point);
+            double tp  = ask + (TakeProfitPips * _Point);
+
+            if(trade.Buy(LotSize, _Symbol, ask, sl, tp, "EMA Cross V1"))
+               Print(">> SUCCESS: Buy order placed at ", ask);
+            else
+               Print(">> ERROR: Order failed. Code: ", GetLastError());
+         }
+         else 
+         {
+            Print(">> BLOCK: Crossover detected but Trend is Bearish (Price < EMA 200).");
+         }
+      }
    }
 }
 
 //+------------------------------------------------------------------+
-//| Helper: New Bar Detection                                        |
+//| Helper: Check for New Bar                                        |
 //+------------------------------------------------------------------+
 bool IsNewBar()
 {
