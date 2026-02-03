@@ -1,51 +1,56 @@
 //+------------------------------------------------------------------+
-//|                                     NCI_Dynamic_Pullback_V1.mq5  |
+//|                                     NCI_Dynamic_Pullback_V1.4.mq5|
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "1.00"
+#property version "1.40"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 //--- 1. TREND (The Big Picture)
-input group "1. Trend Settings (NCI Cornerstone)"
-input int TrendEMA_Period = 200;    // Long-term direction filter
+input group "1. Trend Settings"
+input int TrendEMA_Period = 200;    // Long-term direction
 
 //--- 2. ZONE (The Value Area)
-input group "2. Zone Settings (Dynamic Support)"
-input int ZoneFastEMA     = 20;     // Top of the Buy Zone
-input int ZoneSlowEMA     = 50;     // Bottom of the Buy Zone (Crash Guard)
+input group "2. Zone Settings"
+input int ZoneFastEMA     = 20;     // Top of Buy Zone
+input int ZoneSlowEMA     = 50;     // Bottom of Buy Zone
 
-//--- 3. MOMENTUM & CONFIRMATION
-input group "3. Confirmation Triggers"
-input bool RequireGreenCandle = true; // Confirmation: Close > Open
-input double MinTrendSlope    = 0.00010; // Momentum: 200 EMA must be rising
+//--- 3. STABILITY FILTERS (New)
+input group "3. Stability Filters"
+input double MinFastSlope = 0.00015; // 20 EMA Slope (Momentum)
+input int ADX_Period      = 14;      
+input int ADX_Min         = 20;      // ADX > 20 (Filters dead markets)
 
-//--- 4. RISK MANAGEMENT
-input group "4. Risk Management"
+//--- 4. CONFIRMATION
+input group "4. Confirmation"
+input bool RequireGreenCandle = true; 
+input double MinTrendSlope    = 0.00005; 
+
+//--- 5. RISK MANAGEMENT
+input group "5. Risk Management"
 input double RiskPercent    = 1.0;
-input double StopLossPips   = 150;  // Tight stop below the zone
-input double TakeProfitPips = 450;  // 1:3 Risk/Reward Ratio
+input double StopLossPips   = 150;  
+input double TakeProfitPips = 450;  
 input int TrailingPips      = 200;
 input int BreakEvenPips     = 150;
 
-int FastHandle, SlowHandle, TrendHandle;
+int FastHandle, SlowHandle, TrendHandle, ADXHandle;
 CTrade trade;
 
 int OnInit()
 {
    trade.SetExpertMagicNumber(888999);
 
-   // Initialize Indicators
    FastHandle  = iMA(_Symbol, _Period, ZoneFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    SlowHandle  = iMA(_Symbol, _Period, ZoneSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
    TrendHandle = iMA(_Symbol, _Period, TrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
+   ADXHandle   = iADX(_Symbol, _Period, ADX_Period); // New ADX Handle
 
-   if(FastHandle == INVALID_HANDLE || SlowHandle == INVALID_HANDLE || TrendHandle == INVALID_HANDLE)
-      return INIT_FAILED;
-      
-   return INIT_SUCCEEDED;
+   return (FastHandle == INVALID_HANDLE || SlowHandle == INVALID_HANDLE || 
+           TrendHandle == INVALID_HANDLE || ADXHandle == INVALID_HANDLE) 
+           ? INIT_FAILED : INIT_SUCCEEDED;
 }
 
 void OnTick()
@@ -54,10 +59,11 @@ void OnTick()
    if (!IsNewBar()) return;
 
    //--- Define Arrays
-   double FastMA[], SlowMA[], TrendMA[], Close[], Open[], Low[];
+   double FastMA[], SlowMA[], TrendMA[], ADX[], Close[], Open[], Low[];
    ArraySetAsSeries(FastMA, true); 
    ArraySetAsSeries(SlowMA, true); 
    ArraySetAsSeries(TrendMA, true);
+   ArraySetAsSeries(ADX, true);
    ArraySetAsSeries(Close, true);  
    ArraySetAsSeries(Open, true);
    ArraySetAsSeries(Low, true);
@@ -66,45 +72,48 @@ void OnTick()
    if (CopyBuffer(FastHandle, 0, 0, 20, FastMA) < 20 ||
        CopyBuffer(SlowHandle, 0, 0, 20, SlowMA) < 20 ||
        CopyBuffer(TrendHandle, 0, 0, 20, TrendMA) < 20 ||
+       CopyBuffer(ADXHandle, 0, 0, 20, ADX) < 20 || // Copy ADX
        CopyClose(_Symbol, _Period, 0, 3, Close) < 3 ||
        CopyOpen(_Symbol, _Period, 0, 3, Open) < 3 ||
        CopyLow(_Symbol, _Period, 0, 3, Low) < 3)
       return;
 
-   //--- STRATEGY LOGIC (NCI FLOW) --------------------------------
+   //--- STRATEGY LOGIC -------------------------------------------
 
-   // STEP 1: TREND
-   // Is the 200 EMA rising? (Momentum check)
-   double Slope = TrendMA[1] - TrendMA[10];
-   bool IsUptrend = (Slope > MinTrendSlope) && (Close[1] > TrendMA[1]);
+   // 1. TREND ALIGNMENT (New)
+   // Ensure the Zone is open and ordered (20 > 50).
+   bool IsAligned = (FastMA[1] > SlowMA[1]);
 
-   // STEP 2: ZONE (Pullback)
-   // Did Price dip into our "Value Zone" (below 20 EMA) recently?
-   // We check the Low of the previous candle.
-   bool DipIntoZone = (Low[1] < FastMA[1]);
-   
-   // Safety: Price must still be above the 50 EMA (Crash Guard)
-   bool ZoneHold = (Close[1] > SlowMA[1]);
+   // 2. ADX STABILITY (New)
+   // Ensure the market has actual power (Not sleeping).
+   bool StrongTrend = (ADX[1] > ADX_Min);
 
-   // STEP 3: CONFIRMATION (The Trigger)
-   // Did Price close back ABOVE the 20 EMA?
+   // 3. FAST SLOPE (Momentum)
+   double FastSlope = FastMA[1] - FastMA[5];
+   bool GoodMomentum = (FastSlope > MinFastSlope);
+
+   // 4. LONG TERM TREND
+   double BigSlope = TrendMA[1] - TrendMA[10];
+   bool IsUptrend = (BigSlope > MinTrendSlope) && (Close[1] > TrendMA[1]);
+
+   // 5. THE DIP & TRIGGER
+   bool DipIntoZone = (Low[1] < FastMA[1]); 
+   bool ZoneHold    = (Close[1] > SlowMA[1]); 
    bool BreakBackUp = (Close[1] > FastMA[1]);
-   
-   // Is it a Green Candle? (Buyers are in control)
    bool BullishCandle = (Close[1] > Open[1]);
 
    //--- ENTRY EXECUTION
-   if (PositionsTotal() < 1 && IsUptrend && DipIntoZone && ZoneHold && BreakBackUp && BullishCandle)
+   // Added 'IsAligned' and 'StrongTrend'
+   if (PositionsTotal() < 1 && IsUptrend && IsAligned && StrongTrend && GoodMomentum && DipIntoZone && ZoneHold && BreakBackUp && BullishCandle)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double lot = CalculateLotSize(StopLossPips);
       
-      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "NCI Dynamic Pullback");
+      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "NCI Pullback V1.4 Stable");
    }
 }
 
-//--- HELPER FUNCTIONS -------------------------------------------
-
+//--- HELPER FUNCTIONS (Same as before) --------------------------
 double CalculateLotSize(double sl_pips)
 {
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
@@ -128,11 +137,9 @@ void ManageOpenPositions()
          double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-         // Break Even Logic
          if (sl < open_price && bid >= open_price + (BreakEvenPips * _Point))
             trade.PositionModify(ticket, open_price + (10 * _Point), PositionGetDouble(POSITION_TP));
 
-         // Trailing Stop Logic
          double new_sl = bid - (TrailingPips * _Point);
          if (new_sl > sl + (_Point * 10))
             trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
