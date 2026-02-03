@@ -3,7 +3,7 @@
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "1.12" // Version updated
+#property version "1.14" // Version updated
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -27,12 +27,15 @@ input int BreakEvenPips = 200;
 input group "Slope Filter"
 input double MinSlope = 0.00020; 
 
-//--- UPDATED: Removed Distance, Kept RSI
 input group "RSI Filter (Anti-Spike)"
 input int RSI_Period = 14;     
-input int RSI_Overbought = 70; // Don't buy if RSI is above this level
+input int RSI_Overbought = 70; 
 
-int FastHandle, SlowHandle, TrendHandle, ADXHandle, RSIHandle;
+//--- NEW: CRASH GUARD INPUT
+input group "Crash Guard"
+input int MediumMAPeriod = 50; // Price must be above this EMA to confirm recovery
+
+int FastHandle, SlowHandle, TrendHandle, ADXHandle, RSIHandle, MediumHandle;
 CTrade trade;
 
 int OnInit()
@@ -43,11 +46,14 @@ int OnInit()
    SlowHandle = iMA(_Symbol, _Period, SlowMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    TrendHandle = iMA(_Symbol, _Period, TrendMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    ADXHandle = iADX(_Symbol, _Period, ADX_Period);
-   RSIHandle = iRSI(_Symbol, _Period, RSI_Period, PRICE_CLOSE); // RSI Init
+   RSIHandle = iRSI(_Symbol, _Period, RSI_Period, PRICE_CLOSE); 
+   
+   //--- NEW: Initialize Medium MA Handle
+   MediumHandle = iMA(_Symbol, _Period, MediumMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
 
    return (FastHandle == INVALID_HANDLE || SlowHandle == INVALID_HANDLE ||
            TrendHandle == INVALID_HANDLE || ADXHandle == INVALID_HANDLE ||
-           RSIHandle == INVALID_HANDLE
+           RSIHandle == INVALID_HANDLE || MediumHandle == INVALID_HANDLE
            ? INIT_FAILED
            : INIT_SUCCEEDED);
 }
@@ -58,20 +64,22 @@ void OnTick()
    if (!IsNewBar())
       return;
 
-   double FastEMA[], SlowEMA[], TrendEMA[], ADXValues[], RSIValues[], PriceClose[];
+   double FastEMA[], SlowEMA[], TrendEMA[], ADXValues[], RSIValues[], PriceClose[], MediumEMA[];
    ArraySetAsSeries(FastEMA, true);
    ArraySetAsSeries(SlowEMA, true);
    ArraySetAsSeries(TrendEMA, true);
    ArraySetAsSeries(ADXValues, true);
    ArraySetAsSeries(RSIValues, true);
    ArraySetAsSeries(PriceClose, true);
+   ArraySetAsSeries(MediumEMA, true);
 
-   if (CopyBuffer(FastHandle, 0, 0, 10, FastEMA) < 10 ||
-       CopyBuffer(SlowHandle, 0, 0, 10, SlowEMA) < 10 ||
-       CopyBuffer(TrendHandle, 0, 0, 10, TrendEMA) < 10 ||
-       CopyBuffer(ADXHandle, 0, 0, 10, ADXValues) < 10 ||
-       CopyBuffer(RSIHandle, 0, 0, 10, RSIValues) < 10 || 
-       CopyClose(_Symbol, _Period, 0, 10, PriceClose) < 10)
+   if (CopyBuffer(FastHandle, 0, 0, 20, FastEMA) < 20 ||
+       CopyBuffer(SlowHandle, 0, 0, 20, SlowEMA) < 20 ||
+       CopyBuffer(TrendHandle, 0, 0, 20, TrendEMA) < 20 ||
+       CopyBuffer(ADXHandle, 0, 0, 20, ADXValues) < 20 ||
+       CopyBuffer(RSIHandle, 0, 0, 20, RSIValues) < 20 || 
+       CopyBuffer(MediumHandle, 0, 0, 20, MediumEMA) < 20 || // Copy Medium MA Data
+       CopyClose(_Symbol, _Period, 0, 20, PriceClose) < 20)
       return;
 
    //--- LOGIC
@@ -84,16 +92,23 @@ void OnTick()
    double SlopeDiff = SlowEMA[1] - SlowEMA[6];
    bool GoodSlope = (SlopeDiff > MinSlope);
 
-   //--- RSI FILTER (Replaces Max Distance)
-   // If RSI is > 70, market is exhausted. We wait for a cooldown.
+   //--- RSI FILTER
    bool NotOverbought = (RSIValues[1] < RSI_Overbought);
 
-   //--- ENTRY
-   if (PositionsTotal() < 1 && PriceCrossFast && EMA_Alignment && TrendFilter && StrongTrend && GoodSlope && NotOverbought)
+   //--- TREND ALIGNMENT
+   double TrendSlope = TrendEMA[1] - TrendEMA[10]; 
+   bool TrendIsRising = (TrendSlope > 0);
+
+   //--- NEW: CRASH GUARD LOGIC
+   // Price must be above the 50 EMA to ensure we aren't in a "Dead Cat Bounce"
+   bool AboveCrashLine = (PriceClose[1] > MediumEMA[1]);
+
+   //--- ENTRY: Added '&& AboveCrashLine'
+   if (PositionsTotal() < 1 && PriceCrossFast && EMA_Alignment && TrendFilter && StrongTrend && GoodSlope && NotOverbought && TrendIsRising && AboveCrashLine)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double lot = CalculateLotSize(StopLossPips);
-      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "Early Entry V1.12 RSI");
+      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "Early Entry V1.14 CrashGuard");
    }
 }
 
