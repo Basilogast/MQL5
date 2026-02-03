@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|                                     NCI_Deep_Pullback_V2.0.mq5   |
+//|                                     NCI_Deep_Pullback_V2.1.mq5   |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "2.00"
+#property version "2.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -15,8 +15,8 @@ input int TrendEMA_Period = 200;    // Long-term direction. We only buy above th
 //--- 2. DEEP PULLBACK (The Trigger)
 input group "2. Deep Value Trigger (RSI)"
 input int RSI_Period      = 14;     
-input int RSI_Oversold    = 30;     // The "Key Level" proxy. 
-                                    // We wait for RSI to drop below this (Deep discount).
+input int RSI_Oversold    = 45;     // ADJUSTED: 45 is the "Bull Market Support".
+                                    // 30 is too strict for strong uptrends.
 
 //--- 3. CONFIRMATION
 input group "3. Confirmation"
@@ -24,9 +24,9 @@ input bool RequireGreenCandle = true; // Must close higher than open to confirm 
 
 //--- 4. RISK MANAGEMENT
 input group "4. Risk Management"
-input double RiskPercent    = 2.0;  // Higher risk allowed because win rate is higher on deep dips.
-input double StopLossPips   = 100;  // Tighter SL (since we are at the bottom)
-input double TakeProfitPips = 300;  // 1:3 Ratio
+input double RiskPercent    = 2.0;  
+input double StopLossPips   = 100;  
+input double TakeProfitPips = 300;  
 input int BreakEvenPips     = 100;
 input int TrailingPips      = 150;
 
@@ -35,7 +35,7 @@ CTrade trade;
 
 int OnInit()
 {
-   trade.SetExpertMagicNumber(777666); // New Magic Number
+   trade.SetExpertMagicNumber(777666); 
 
    TrendHandle = iMA(_Symbol, _Period, TrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
    RSIHandle   = iRSI(_Symbol, _Period, RSI_Period, PRICE_CLOSE);
@@ -66,31 +66,28 @@ void OnTick()
    //--- STRATEGY LOGIC -------------------------------------------
 
    // 1. TREND FILTER
-   // Price must be above the 200 EMA. 
-   // We don't want to buy a "deep dip" that is actually a market crash.
+   // Price must be above the 200 EMA (Bull Market).
    bool IsUptrend = (Close[1] > TrendMA[1]);
 
-   // 2. DEEP VALUE TRIGGER (RSI Cross)
-   // Condition A: RSI was below 30 recently (at candle 1 or 2).
+   // 2. VALUE TRIGGER (RSI Cross)
+   // Condition A: RSI dipped into the "Value Zone" (Below 45) recently.
+   // We look back 1 or 2 candles to catch the bottom of the "V".
    bool WasOversold = (RSI[1] < RSI_Oversold) || (RSI[2] < RSI_Oversold);
    
-   // Condition B: RSI is now pointing UP (Recovering).
+   // Condition B: RSI is now recovering (Turning Up).
    bool RSIRising = (RSI[0] > RSI[1]);
-
-   // Condition C: RSI is back above the danger zone (optional safety).
-   // bool SafeRSI = (RSI[1] > RSI_Oversold); 
 
    // 3. CANDLE CONFIRMATION
    bool GreenCandle = (Close[1] > Open[1]);
 
    //--- ENTRY EXECUTION
-   // We buy if Uptrend + Was Oversold + RSI is turning up + Green Candle
+   // We buy if Uptrend + Dip to 45 + RSI turning up + Green Candle
    if (PositionsTotal() < 1 && IsUptrend && WasOversold && RSIRising && GreenCandle)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double lot = CalculateLotSize(StopLossPips);
       
-      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "NCI Deep Value V2.0");
+      trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), "NCI Bull Dip V2.1");
    }
 }
 
