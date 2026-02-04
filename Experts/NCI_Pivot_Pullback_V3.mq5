@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|           NCI_Pivot_Pro_Swing_V15.0_Full_Cycle.mq5               |
+//|           NCI_Pivot_Pro_Swing_V15.1_Visuals.mq5                  |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "15.00"
+#property version "15.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -17,8 +17,8 @@ input int TrendEMA_Period   = 200;
 input group "2. Pivot Settings"
 input bool Trade_S1 = true; // Buy Support 1
 input bool Trade_S2 = true; // Buy Support 2
-input bool Trade_R1 = true; // NEW: Sell Resistance 1
-input bool Trade_R2 = true; // NEW: Sell Resistance 2
+input bool Trade_R1 = true; // Sell Resistance 1
+input bool Trade_R2 = true; // Sell Resistance 2
 
 //--- 3. ENTRY LOGIC
 input group "3. Entry Logic"
@@ -29,7 +29,7 @@ input double GreenBufferPips = 0.0;
 
 //--- 4. PROTECTION
 input group "4. Crash/Rocket Protection"
-input bool AvoidViolentMoves = true; // Skip Falling Knife (Buy) or Rocket (Sell)
+input bool AvoidViolentMoves = true; 
 input double MaxCandleSizeATR = 2.0; 
 
 //--- 5. DYNAMIC STOP LOSS
@@ -50,6 +50,7 @@ input double RiskPercent_Burst    = 0.5;
 
 //--- 8. VISUAL SETTINGS
 input bool ShowLines = true;      
+input color Color_R2 = clrDarkGreen; // NEW: Visual for R2
 input color Color_R1 = clrGreen;  
 input color Color_P  = clrBlue;   
 input color Color_S1 = clrRed;    
@@ -105,10 +106,9 @@ void OnTick()
       IsDowntrend = (Close[1] < TrendMA[1]);
    }
 
-   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK); // Buy Price
-   double currentBid   = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Sell Price
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK); 
+   double currentBid   = SymbolInfoDouble(_Symbol, SYMBOL_BID); 
 
-   // SIGNALS
    bool Signal_S1 = false, Signal_S2 = false;
    bool Signal_R1 = false, Signal_R2 = false;
    string triggerType = ""; 
@@ -116,17 +116,16 @@ void OnTick()
    //--- 1. STANDARD ENTRY (Candle Close)
    if (IsNewBar())
    {
-      // BUY LOGIC (Bounce off Support)
+      // BUY LOGIC
       if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) { Signal_S1 = true; triggerType = "Candle Close"; }
       if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) { Signal_S2 = true; triggerType = "Candle Close"; }
 
-      // SELL LOGIC (Bounce off Resistance)
-      // High touched R1/R2, but Close is BELOW it (Red Candle)
+      // SELL LOGIC
       if (High[1] >= R1 && Close[1] < R1 && Close[1] < Open[1]) { Signal_R1 = true; triggerType = "Candle Close"; }
       if (High[1] >= R2 && Close[1] < R2 && Close[1] < Open[1]) { Signal_R2 = true; triggerType = "Candle Close"; }
    }
 
-   //--- 2. VOLUME BURST ENTRY (Mid-Candle)
+   //--- 2. VOLUME BURST ENTRY
    if (UseVolumeBurst && !Signal_S1 && !Signal_S2 && !Signal_R1 && !Signal_R2)
    {
       if (IsHighVolume())
@@ -136,61 +135,36 @@ void OnTick()
          if (currentPrice > S1 && Open[0] < S1 && currentPrice > solidGreen) { Signal_S1 = true; triggerType = "Volume Burst"; }
          if (currentPrice > S2 && Open[0] < S2 && currentPrice > solidGreen) { Signal_S2 = true; triggerType = "Volume Burst"; }
 
-         // SELL BURST (Inverted)
-         // Open was ABOVE Line, Price is now BELOW Line (and Red)
+         // SELL BURST
          double solidRed = Open[0] - (GreenBufferPips * 10 * _Point);
          if (currentBid < R1 && Open[0] > R1 && currentBid < solidRed) { Signal_R1 = true; triggerType = "Volume Burst"; }
          if (currentBid < R2 && Open[0] > R2 && currentBid < solidRed) { Signal_R2 = true; triggerType = "Volume Burst"; }
       }
    }
    
-   //--- 3. PROTECTION (Violent Move Filter)
+   //--- 3. PROTECTION
    if (AvoidViolentMoves)
    {
       double candleSize = High[1] - Low[1];
       double averageSize = ATR[1];
-      
-      // If BUYING, avoid Falling Knife (Huge Red Candle)
       if ((Signal_S1 || Signal_S2) && Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return;
-
-      // If SELLING, avoid Rocket Launch (Huge Green Candle)
       if ((Signal_R1 || Signal_R2) && Close[1] > Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return;
    }
 
-   //=========================================================
-   // BUY EXECUTION (S1 & S2)
-   //=========================================================
+   // EXECUTION
    if (PositionsTotal() < 1 && IsUptrend)
    {
-      if (Trade_S1 && Signal_S1)
-      {
-         ProcessEntry(ORDER_TYPE_BUY, S1, S2, R1, P, triggerType, "S1");
-      }
-      else if (Trade_S2 && Signal_S2)
-      {
-         ProcessEntry(ORDER_TYPE_BUY, S2, S3, P, P, triggerType, "S2");
-      }
+      if (Trade_S1 && Signal_S1) ProcessEntry(ORDER_TYPE_BUY, S1, S2, R1, P, triggerType, "S1");
+      else if (Trade_S2 && Signal_S2) ProcessEntry(ORDER_TYPE_BUY, S2, S3, P, P, triggerType, "S2");
    }
 
-   //=========================================================
-   // SELL EXECUTION (R1 & R2)
-   //=========================================================
    if (PositionsTotal() < 1 && IsDowntrend)
    {
-      if (Trade_R1 && Signal_R1)
-      {
-         // Sell at R1 -> Stop R2 -> Target S1
-         ProcessEntry(ORDER_TYPE_SELL, R1, R2, S1, P, triggerType, "R1");
-      }
-      else if (Trade_R2 && Signal_R2)
-      {
-         // Sell at R2 -> Stop R3 -> Target P
-         ProcessEntry(ORDER_TYPE_SELL, R2, R3, P, P, triggerType, "R2");
-      }
+      if (Trade_R1 && Signal_R1) ProcessEntry(ORDER_TYPE_SELL, R1, R2, S1, P, triggerType, "R1");
+      else if (Trade_R2 && Signal_R2) ProcessEntry(ORDER_TYPE_SELL, R2, R3, P, P, triggerType, "R2");
    }
 }
 
-//--- NEW: UNIFIED ENTRY PROCESSOR (Handles both Buy & Sell math)
 void ProcessEntry(ENUM_ORDER_TYPE type, double level, double next_level, double target, double pivot, string trigger, string label)
 {
    double currentPrice = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -199,36 +173,30 @@ void ProcessEntry(ENUM_ORDER_TYPE type, double level, double next_level, double 
    double dist_pips = MathAbs(level - next_level) / _Point / 10.0;
    double execution_sl, calculation_sl;
 
-   // 1. Calculate Stops
    if (type == ORDER_TYPE_BUY)
    {
-      calculation_sl = next_level - (SafetyBuffer * _Point); // Deep Stop
-      if (dist_pips > CompressionThreshold) execution_sl = level - ((level - next_level) / 2.0); // Midpoint
+      calculation_sl = next_level - (SafetyBuffer * _Point); 
+      if (dist_pips > CompressionThreshold) execution_sl = level - ((level - next_level) / 2.0); 
       else execution_sl = calculation_sl;
    }
-   else // SELL
+   else 
    {
-      calculation_sl = next_level + (SafetyBuffer * _Point); // Deep Stop (Above Attic)
-      if (dist_pips > CompressionThreshold) execution_sl = level + ((next_level - level) / 2.0); // Midpoint
+      calculation_sl = next_level + (SafetyBuffer * _Point); 
+      if (dist_pips > CompressionThreshold) execution_sl = level + ((next_level - level) / 2.0); 
       else execution_sl = calculation_sl;
    }
 
-   // 2. Target
    double tp = UseStructuralTarget ? target : (type == ORDER_TYPE_BUY ? currentPrice + BackupTP_Pips*_Point : currentPrice - BackupTP_Pips*_Point);
 
-   // 3. R:R Check
    double risk = MathAbs(currentPrice - execution_sl);
    double reward = MathAbs(tp - currentPrice);
    if (risk > 0 && (reward/risk) < MinRiskReward) return;
 
-   // 4. Comment Generation: "Type_Pivot_Target"
    string clean_comment = label + "_" + DoubleToString(pivot, 5) + "_" + DoubleToString(target, 5); 
-   
    Print("OPENING ", label, " ", EnumToString(type), ". Type: ", trigger);
    OpenDynamicTrade(type, clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRisk);
 }
 
-//--- MANAGEMENT: SCALE OUT AT PIVOT (Works for Buys & Sells)
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -243,7 +211,6 @@ void ManageOpenPositions()
          long type = PositionGetInteger(POSITION_TYPE);
          string comment = PositionGetString(POSITION_COMMENT);
 
-         // Helper to parse comments like "S1_1.3000_1.3050" or "R1_1.3000_1.2950"
          if (StringFind(comment, "_") > 0)
          {
             int first_sep = StringFind(comment, "_");
@@ -262,33 +229,27 @@ void ManageOpenPositions()
                   bool hit50 = false;
                   double dist = MathAbs(Orig_Target - Orig_P);
                   
-                  // --- BUY LOGIC ---
                   if (type == POSITION_TYPE_BUY)
                   {
                      if (bid > Orig_P) hitPivot = true;
                      if (bid > (Orig_P + dist * 0.5)) hit50 = true;
                      
-                     // 1. Scale Out
                      if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
-                     // 2. Lock Profit at Pivot (at 50%)
                      if (hit50) 
                      {
                         double new_sl = Orig_P - (HardFloorBuffer * _Point);
                         if (new_sl > sl + _Point) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
                      }
                   }
-                  // --- SELL LOGIC ---
                   else if (type == POSITION_TYPE_SELL)
                   {
-                     if (ask < Orig_P) hitPivot = true; // Price dropped below Pivot
-                     if (ask < (Orig_P - dist * 0.5)) hit50 = true; // Dropped 50% to target
+                     if (ask < Orig_P) hitPivot = true; 
+                     if (ask < (Orig_P - dist * 0.5)) hit50 = true; 
                      
-                     // 1. Scale Out
                      if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
-                     // 2. Lock Profit at Pivot (at 50%)
                      if (hit50)
                      {
-                        double new_sl = Orig_P + (HardFloorBuffer * _Point); // Stop goes DOWN to Pivot
+                        double new_sl = Orig_P + (HardFloorBuffer * _Point); 
                         if (new_sl < sl - _Point || sl == 0) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
                      }
                   }
@@ -299,7 +260,6 @@ void ManageOpenPositions()
    }
 }
 
-//--- HELPERS
 void DoScaleOut(ulong ticket, double vol)
 {
    double min_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -349,12 +309,14 @@ void CalculateDailyPivots()
       S2 = P - (high - low);
       S3 = low - 2 * (high - P); 
       R1 = (2 * P) - low; 
-      R2 = P + (high - low); // Standard R2 Formula
+      R2 = P + (high - low); 
       R3 = high + 2 * (P - low);
       
       if (ShowLines)
       {
          datetime end = currentDay + 86400; 
+         // ADDED R2 HERE
+         DrawSegment("R2_"+TimeToString(currentDay), currentDay, end, R2, Color_R2, STYLE_DASH);
          DrawSegment("R1_"+TimeToString(currentDay), currentDay, end, R1, Color_R1, STYLE_SOLID);
          DrawSegment("P_"+TimeToString(currentDay), currentDay, end, P, Color_P, STYLE_SOLID);
          DrawSegment("S1_"+TimeToString(currentDay), currentDay, end, S1, Color_S1, STYLE_SOLID);
