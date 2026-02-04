@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|             NCI_Pivot_Pro_Swing_V11.1_GreenBuffer.mq5            |
+//|         NCI_Pivot_Pro_Swing_V13.1_Dynamic_Midpoint.mq5           |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "11.10"
+#property version "13.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -23,25 +23,29 @@ input group "3. Entry Logic"
 input bool UseVolumeBurst   = true;  
 input double VolumeMultiplier = 1.2; 
 input double MinRiskReward  = 0.6;   
-input double GreenBufferPips = 0.0;  // NEW: Price must be 5 pips > Open to confirm Green
+input double GreenBufferPips = 0.0;  
 
-//--- 4. KNIFE PROTECTION
+//--- 4. PROTECTION
 input group "4. Crash Protection"
 input bool AvoidFallingKnife = true; 
 input double MaxCandleSizeATR = 2.0; 
 
-//--- 5. EXIT SETTINGS
-input group "5. Exit Settings"
+//--- 5. DYNAMIC STOP LOSS (NEW)
+input group "5. Dynamic Stop Loss"
+input double CompressionThreshold = 50.0; // Pips. If Gap > 50, use Midpoint. If < 50, use Next Level.
+input double SafetyBuffer   = 50;         // Points buffer (5 pips)
+
+//--- 6. EXIT SETTINGS
+input group "6. Exit Settings"
 input bool UseStructuralTarget = true; 
 input double HardFloorBuffer   = 50;   
+input double BackupTP_Pips     = 300;   
 
-//--- 6. RISK MANAGEMENT
-input group "6. Structural Risk"
+//--- 7. RISK MANAGEMENT
+input group "7. Structural Risk"
 input double RiskPercent    = 1.0;   
-input double SafetyBuffer   = 50;    
-input double BackupTP_Pips  = 300;   
 
-//--- 7. VISUAL SETTINGS
+//--- 8. VISUAL SETTINGS
 input bool ShowLines = true;      
 input color Color_R1 = clrGreen;  
 input color Color_P  = clrBlue;   
@@ -96,73 +100,106 @@ void OnTick()
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    bool Signal_S1 = false;
    bool Signal_S2 = false;
+   string triggerType = ""; 
 
    //--- STANDARD ENTRY
    if (IsNewBar())
    {
-      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) Signal_S1 = true; 
-      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) Signal_S2 = true;
+      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) 
+      {
+         Signal_S1 = true;
+         triggerType = "Candle Close";
+      }
+      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) 
+      {
+         Signal_S2 = true;
+         triggerType = "Candle Close";
+      }
    }
 
-   //--- VOLUME BURST ENTRY (UPDATED WITH GREEN BUFFER)
+   //--- VOLUME BURST ENTRY
    if (UseVolumeBurst && !Signal_S1 && !Signal_S2)
    {
       if (IsHighVolume())
       {
-         // Calculate the "Solid Green" Price Threshold
-         // Price must be at least Open + 5 pips to count as a burst
          double solidGreenPrice = Open[0] + (GreenBufferPips * 10 * _Point);
-
-         // Logic: Current Price > S1 AND Price > SolidGreenThreshold
          if (currentPrice > S1 && Open[0] < S1 && currentPrice > solidGreenPrice)
          {
             Signal_S1 = true;
+            triggerType = "Volume Burst";
          }
          if (currentPrice > S2 && Open[0] < S2 && currentPrice > solidGreenPrice)
          {
             Signal_S2 = true;
+            triggerType = "Volume Burst";
          }
       }
    }
    
-   //--- KNIFE PROTECTION CHECK
+   //--- KNIFE PROTECTION
    if (AvoidFallingKnife)
    {
       double candleSize = High[1] - Low[1];
       double averageSize = ATR[1];
-      
-      if (Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR))
-      {
-         Print("Skipped Trade: Falling Knife Detected! Candle size: ", candleSize, " vs ATR: ", averageSize);
-         return; 
-      }
+      if (Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return; 
    }
 
-   //--- EXECUTION
+   //--- EXECUTION LOGIC (WITH DYNAMIC MIDPOINT STOP)
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
    {
-      double sl = S2 - (SafetyBuffer * _Point); 
-      double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
-      
-      double risk   = currentPrice - sl;
-      double reward = tp - currentPrice;
-      double rr_ratio = (risk > 0) ? reward/risk : 0;
+      double sl;
+      double dist_S1_S2_pips = (S1 - S2) / _Point / 10.0; // Distance in Pips
 
-      if (risk > 0 && rr_ratio < MinRiskReward) return; 
+      // --- DYNAMIC SL LOGIC ---
+      if (dist_S1_S2_pips > CompressionThreshold)
+      {
+          // GAP IS HUGE -> USE MIDPOINT
+          // Place Stop at 50% between S1 and S2
+          sl = S1 - ((S1 - S2) / 2.0); 
+          Print("High Volatility (", dist_S1_S2_pips, " pips). Using Midpoint Stop.");
+      }
+      else
+      {
+          // GAP IS SMALL -> USE S2 BASEMENT
+          sl = S2 - (SafetyBuffer * _Point);
+          Print("Compressed Market (", dist_S1_S2_pips, " pips). Using S2 Stop.");
+      }
+
+      double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
+      double risk = currentPrice - sl;
+      double reward = tp - currentPrice;
+      if (risk > 0 && (reward/risk) < MinRiskReward) return; 
+
+      Print("OPENING S1 BUY. Trigger: ", triggerType, " | Price: ", currentPrice);
       
       string clean_comment = "S1_" + DoubleToString(P, 5); 
       OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
    {
-      double sl = S3 - (SafetyBuffer * _Point); 
-      double tp = UseStructuralTarget ? P : (currentPrice + BackupTP_Pips * _Point);
-      
-      double risk   = currentPrice - sl;
-      double reward = tp - currentPrice;
-      double rr_ratio = (risk > 0) ? reward/risk : 0;
+      double sl;
+      double dist_S2_S3_pips = (S2 - S3) / _Point / 10.0;
 
-      if (risk > 0 && rr_ratio < MinRiskReward) return; 
+      // --- DYNAMIC SL LOGIC ---
+      if (dist_S2_S3_pips > CompressionThreshold)
+      {
+          // GAP IS HUGE -> USE MIDPOINT
+          sl = S2 - ((S2 - S3) / 2.0);
+          Print("High Volatility (", dist_S2_S3_pips, " pips). Using Midpoint Stop.");
+      }
+      else
+      {
+          // GAP IS SMALL -> USE S3 BASEMENT
+          sl = S3 - (SafetyBuffer * _Point);
+          Print("Compressed Market (", dist_S2_S3_pips, " pips). Using S3 Stop.");
+      }
+
+      double tp = UseStructuralTarget ? P : (currentPrice + BackupTP_Pips * _Point);
+      double risk = currentPrice - sl;
+      double reward = tp - currentPrice;
+      if (risk > 0 && (reward/risk) < MinRiskReward) return; 
+
+      Print("OPENING S2 BUY. Trigger: ", triggerType, " | Price: ", currentPrice);
       
       string clean_comment = "S2_" + DoubleToString(P, 5);
       OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
