@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|               NCI_Pivot_Pro_Swing_V10.0_Fixed_Logic.mq5          |
+//|             NCI_Pivot_Pro_Swing_V11.0_Knife_Protection.mq5       |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "10.00"
+#property version "11.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -24,18 +24,23 @@ input bool UseVolumeBurst   = true;
 input double VolumeMultiplier = 1.2; 
 input double MinRiskReward  = 0.6;   
 
-//--- 4. EXIT SETTINGS
-input group "4. Exit Settings"
+//--- 4. KNIFE PROTECTION (NEW)
+input group "4. Crash Protection"
+input bool AvoidFallingKnife = true; // Skip if drop is too violent?
+input double MaxCandleSizeATR = 2.0; // If drop candle is > 2x ATR, don't buy.
+
+//--- 5. EXIT SETTINGS
+input group "5. Exit Settings"
 input bool UseStructuralTarget = true; 
 input double HardFloorBuffer   = 50;   
 
-//--- 5. RISK MANAGEMENT
-input group "5. Structural Risk"
+//--- 6. RISK MANAGEMENT
+input group "6. Structural Risk"
 input double RiskPercent    = 1.0;   
 input double SafetyBuffer   = 50;    
 input double BackupTP_Pips  = 300;   
 
-//--- 6. VISUAL SETTINGS
+//--- 7. VISUAL SETTINGS
 input bool ShowLines = true;      
 input color Color_R1 = clrGreen;  
 input color Color_P  = clrBlue;   
@@ -43,6 +48,7 @@ input color Color_S1 = clrRed;
 input color Color_S2 = clrDarkRed;
 
 int TrendHandle;
+int ATRHandle; // NEW
 CTrade trade;
 
 // Global Variables
@@ -53,7 +59,10 @@ int OnInit()
 {
    trade.SetExpertMagicNumber(555444);
    TrendHandle = iMA(_Symbol, _Period, TrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
-   return (TrendHandle == INVALID_HANDLE) ? INIT_FAILED : INIT_SUCCEEDED;
+   ATRHandle   = iATR(_Symbol, _Period, 14); // Standard ATR
+   
+   if (TrendHandle == INVALID_HANDLE || ATRHandle == INVALID_HANDLE) return INIT_FAILED;
+   return INIT_SUCCEEDED;
 }
 
 void OnTick()
@@ -63,16 +72,20 @@ void OnTick()
 
    if (!IsNewBar() && !UseVolumeBurst) return; 
 
-   double TrendMA[], Close[], Open[], Low[];
+   double TrendMA[], Close[], Open[], Low[], High[], ATR[];
    ArraySetAsSeries(TrendMA, true); 
    ArraySetAsSeries(Close, true);  
    ArraySetAsSeries(Open, true);
    ArraySetAsSeries(Low, true);
+   ArraySetAsSeries(High, true);
+   ArraySetAsSeries(ATR, true);
 
    if (CopyBuffer(TrendHandle, 0, 0, 3, TrendMA) < 3 ||
+       CopyBuffer(ATRHandle, 0, 0, 3, ATR) < 3 ||
        CopyClose(_Symbol, _Period, 0, 3, Close) < 3 ||
        CopyOpen(_Symbol, _Period, 0, 3, Open) < 3 ||
-       CopyLow(_Symbol, _Period, 0, 3, Low) < 3)
+       CopyLow(_Symbol, _Period, 0, 3, Low) < 3 ||
+       CopyHigh(_Symbol, _Period, 0, 3, High) < 3)
       return;
 
    //--- TREND
@@ -99,8 +112,24 @@ void OnTick()
          if (currentPrice > S2 && Open[0] < S2 && currentPrice > Open[0]) Signal_S2 = true;
       }
    }
+   
+   //--- NEW: KNIFE PROTECTION CHECK
+   // We look at Candle [1] (the completed one) or Candle [0] (current).
+   // If the body is HUGE, we assume panic.
+   if (AvoidFallingKnife)
+   {
+      double candleSize = High[1] - Low[1];
+      double averageSize = ATR[1];
+      
+      // If the candle before our entry was a monster drop
+      if (Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR))
+      {
+         Print("Skipped Trade: Falling Knife Detected! Candle size: ", candleSize, " vs ATR: ", averageSize);
+         return; 
+      }
+   }
 
-   //--- EXECUTION (Saving Trigger Price in Comment)
+   //--- EXECUTION
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
    {
       double sl = S2 - (SafetyBuffer * _Point); 
@@ -112,8 +141,6 @@ void OnTick()
 
       if (risk > 0 && rr_ratio < MinRiskReward) return; 
       
-      // SAVE THE PIVOT PRICE (P) INTO THE COMMENT
-      // Format: "S1_TriggerPrice"
       string clean_comment = "S1_" + DoubleToString(P, 5); 
       OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
    }
@@ -128,7 +155,7 @@ void OnTick()
 
       if (risk > 0 && rr_ratio < MinRiskReward) return; 
       
-      string clean_comment = "S2_" + DoubleToString(P, 5); // Saving P as target/ref
+      string clean_comment = "S2_" + DoubleToString(P, 5);
       OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
    }
 }
@@ -145,25 +172,19 @@ void ManageOpenPositions()
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          string comment = PositionGetString(POSITION_COMMENT);
 
-         // We check: Is this an S1 trade?
          if (StringFind(comment, "S1_") >= 0)
          {
-            // EXTRACT THE ORIGINAL PIVOT FROM COMMENT
-            // Comment looks like "S1_1.25430"
-            string p_string = StringSubstr(comment, 3, 7); // Grab the number part
+            string p_string = StringSubstr(comment, 3, 7); 
             double Original_P = StringToDouble(p_string);
             
-            // Safety Check: If conversion failed, ignore.
             if (Original_P > 0)
             {
-               // NOW we compare price to the ORIGINAL P, not the Global P
                if (bid > Original_P)
                {
                   double new_floor = Original_P - (HardFloorBuffer * _Point); 
                   if (new_floor > sl + (_Point * 10))
                   {
                      trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
-                     Print("Step Up! Price crossed Original Pivot (", Original_P, ")");
                   }
                }
             }
@@ -172,7 +193,7 @@ void ManageOpenPositions()
    }
 }
 
-//--- HELPERS (Standard) ---
+//--- HELPERS ---
 bool IsHighVolume()
 {
    long volumes[];
