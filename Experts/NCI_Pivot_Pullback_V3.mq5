@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Pivot_Pro_Swing_V13.1_Dynamic_Midpoint.mq5           |
+//|         NCI_Pivot_Pro_Swing_V13.2_Phantom_Risk.mq5               |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "13.10"
+#property version "13.20"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -30,10 +30,10 @@ input group "4. Crash Protection"
 input bool AvoidFallingKnife = true; 
 input double MaxCandleSizeATR = 2.0; 
 
-//--- 5. DYNAMIC STOP LOSS (NEW)
+//--- 5. DYNAMIC STOP LOSS
 input group "5. Dynamic Stop Loss"
-input double CompressionThreshold = 50.0; // Pips. If Gap > 50, use Midpoint. If < 50, use Next Level.
-input double SafetyBuffer   = 50;         // Points buffer (5 pips)
+input double CompressionThreshold = 50.0; 
+input double SafetyBuffer   = 50;         
 
 //--- 6. EXIT SETTINGS
 input group "6. Exit Settings"
@@ -144,69 +144,77 @@ void OnTick()
       if (Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return; 
    }
 
-   //--- EXECUTION LOGIC (WITH DYNAMIC MIDPOINT STOP)
+   //--- EXECUTION LOGIC (WITH PHANTOM RISK MATH)
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
    {
-      double sl;
-      double dist_S1_S2_pips = (S1 - S2) / _Point / 10.0; // Distance in Pips
+      double execution_sl;  // The actual Stop Loss sent to Broker
+      double calculation_sl; // The Stop Loss used for Lot Size (Deep)
+      
+      double dist_S1_S2_pips = (S1 - S2) / _Point / 10.0;
 
-      // --- DYNAMIC SL LOGIC ---
+      // 1. Determine Structural Basement (For Math)
+      calculation_sl = S2 - (SafetyBuffer * _Point);
+
+      // 2. Determine Execution Stop (For Safety)
       if (dist_S1_S2_pips > CompressionThreshold)
       {
-          // GAP IS HUGE -> USE MIDPOINT
-          // Place Stop at 50% between S1 and S2
-          sl = S1 - ((S1 - S2) / 2.0); 
-          Print("High Volatility (", dist_S1_S2_pips, " pips). Using Midpoint Stop.");
+          // High Volatility: Cut loss at Midpoint
+          execution_sl = S1 - ((S1 - S2) / 2.0); 
+          Print("Using Midpoint Stop. Lot Size based on S2 (Phantom Risk).");
       }
       else
       {
-          // GAP IS SMALL -> USE S2 BASEMENT
-          sl = S2 - (SafetyBuffer * _Point);
-          Print("Compressed Market (", dist_S1_S2_pips, " pips). Using S2 Stop.");
+          // Compressed: Stop at S2
+          execution_sl = S2 - (SafetyBuffer * _Point);
       }
 
       double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
-      double risk = currentPrice - sl;
+      
+      // R:R Check (Based on Execution SL)
+      double risk = currentPrice - execution_sl;
       double reward = tp - currentPrice;
       if (risk > 0 && (reward/risk) < MinRiskReward) return; 
 
       Print("OPENING S1 BUY. Trigger: ", triggerType, " | Price: ", currentPrice);
       
       string clean_comment = "S1_" + DoubleToString(P, 5); 
-      OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
+      // PASS BOTH SL VALUES
+      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
    {
-      double sl;
+      double execution_sl;
+      double calculation_sl;
+      
       double dist_S2_S3_pips = (S2 - S3) / _Point / 10.0;
 
-      // --- DYNAMIC SL LOGIC ---
+      // 1. Determine Structural Basement (For Math)
+      calculation_sl = S3 - (SafetyBuffer * _Point);
+
+      // 2. Determine Execution Stop
       if (dist_S2_S3_pips > CompressionThreshold)
       {
-          // GAP IS HUGE -> USE MIDPOINT
-          sl = S2 - ((S2 - S3) / 2.0);
-          Print("High Volatility (", dist_S2_S3_pips, " pips). Using Midpoint Stop.");
+          execution_sl = S2 - ((S2 - S3) / 2.0);
+          Print("Using Midpoint Stop. Lot Size based on S3 (Phantom Risk).");
       }
       else
       {
-          // GAP IS SMALL -> USE S3 BASEMENT
-          sl = S3 - (SafetyBuffer * _Point);
-          Print("Compressed Market (", dist_S2_S3_pips, " pips). Using S3 Stop.");
+          execution_sl = S3 - (SafetyBuffer * _Point);
       }
 
       double tp = UseStructuralTarget ? P : (currentPrice + BackupTP_Pips * _Point);
-      double risk = currentPrice - sl;
+      double risk = currentPrice - execution_sl;
       double reward = tp - currentPrice;
       if (risk > 0 && (reward/risk) < MinRiskReward) return; 
 
       Print("OPENING S2 BUY. Trigger: ", triggerType, " | Price: ", currentPrice);
       
       string clean_comment = "S2_" + DoubleToString(P, 5);
-      OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
+      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp);
    }
 }
 
-//--- FIXED MANAGEMENT LOGIC
+//--- MANAGEMENT (No Changes)
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -239,7 +247,7 @@ void ManageOpenPositions()
    }
 }
 
-//--- HELPERS ---
+//--- HELPERS
 bool IsHighVolume()
 {
    long volumes[];
@@ -292,17 +300,24 @@ void DrawSegment(string name, datetime t1, datetime t2, double price, color col,
    }
 }
 
-void OpenDynamicTrade(string comment, double entry, double sl, double tp)
+//--- UPDATED: OpenTrade now takes TWO stop losses
+// calc_sl: Used for Math (Distance to S2)
+// real_sl: Used for Broker (Midpoint)
+void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_sl, double tp)
 {
-   double sl_distance = entry - sl;
-   if (sl_distance <= 0) return;
+   // 1. Calculate Lot Size based on the PHANTOM STOP (Deep S2/S3)
+   double sl_distance_for_math = entry - calc_sl;
+   
+   if (sl_distance_for_math <= 0) return;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double risk_money = balance * (RiskPercent / 100.0);
    
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   double lot_size = risk_money / ((sl_distance / tick_size) * tick_value);
+   
+   // This creates the smaller, safer lot size
+   double lot_size = risk_money / ((sl_distance_for_math / tick_size) * tick_value);
    
    double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -311,7 +326,8 @@ void OpenDynamicTrade(string comment, double entry, double sl, double tp)
    lot_size = MathFloor(lot_size / step) * step;
    lot_size = MathMax(min_lot, MathMin(max_lot, lot_size));
 
-   trade.Buy(lot_size, _Symbol, entry, sl, tp, comment);
+   // 2. Execute Trade using the REAL STOP (Dynamic Midpoint)
+   trade.Buy(lot_size, _Symbol, entry, real_sl, tp, comment);
 }
 
 bool IsNewBar()
