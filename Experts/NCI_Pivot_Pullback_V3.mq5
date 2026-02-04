@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Pivot_Pro_Swing_V13.5_TwoStep.mq5                    |
+//|         NCI_Pivot_Pro_Swing_V13.6_ScaleOut.mq5                   |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "13.50"
+#property version "13.60"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -152,7 +152,6 @@ void OnTick()
 
       double execution_sl;  
       double calculation_sl; 
-      
       double dist_S1_S2_pips = (S1 - S2) / _Point / 10.0;
 
       calculation_sl = S2 - (SafetyBuffer * _Point);
@@ -174,7 +173,6 @@ void OnTick()
       if (risk > 0 && (reward/risk) < MinRiskReward) return; 
 
       Print("OPENING S1. Type: ", triggerType);
-      
       string clean_comment = "S1_" + DoubleToString(P, 5) + "_" + DoubleToString(R1, 5); 
       OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRiskPercent);
    }
@@ -205,13 +203,12 @@ void OnTick()
       if (risk > 0 && (reward/risk) < MinRiskReward) return; 
 
       Print("OPENING S2. Type: ", triggerType);
-      
       string clean_comment = "S2_" + DoubleToString(P, 5);
       OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRiskPercent);
    }
 }
 
-//--- NEW: TWO-STEP TRAILING STOP
+//--- MANAGEMENT: SCALE OUT AT PIVOT
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -221,7 +218,7 @@ void ManageOpenPositions()
          ulong ticket = PositionGetInteger(POSITION_TICKET);
          double sl = PositionGetDouble(POSITION_SL);
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double openPrice = PositionGetDouble(POSITION_PRICE_OPEN); // Get Entry Price
+         double vol = PositionGetDouble(POSITION_VOLUME);
          string comment = PositionGetString(POSITION_COMMENT);
 
          if (StringFind(comment, "S1_") >= 0)
@@ -239,32 +236,42 @@ void ManageOpenPositions()
                
                if (Original_P > 0 && Original_R1 > 0)
                {
-                  // --- STAGE 2: PROFIT LOCK (At 50%) ---
-                  double distance = Original_R1 - Original_P;
-                  double triggerPrice_Stage2 = Original_P + (distance * 0.5); 
-                  
-                  if (bid > triggerPrice_Stage2)
+                  // --- TRIGGER 1: HIT PIVOT (SCALE OUT 50%) ---
+                  if (bid > Original_P)
                   {
-                     double new_sl_stage2 = Original_P - (HardFloorBuffer * _Point); 
-                     if (new_sl_stage2 > sl + (_Point * 10))
+                     // Check if we already scaled out by looking at history
+                     if (!HasPartiallyClosed(ticket))
                      {
-                        trade.PositionModify(ticket, new_sl_stage2, PositionGetDouble(POSITION_TP));
-                        Print("Stage 2 Complete! Locked SL at Pivot (Profit Lock).");
-                        return; // Done
+                        // Check if volume is large enough to split
+                        double min_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+                        if (vol > min_vol)
+                        {
+                           double half_vol = vol / 2.0;
+                           // Round to nearest step
+                           double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+                           half_vol = MathFloor(half_vol / step) * step;
+                           
+                           if (half_vol >= min_vol)
+                           {
+                              trade.PositionClosePartial(ticket, half_vol);
+                              Print("Hit Pivot! Scaled Out 50% Profit. Keeping SL at original location.");
+                           }
+                        }
                      }
                   }
 
-                  // --- STAGE 1: SAFETY NET (At Pivot) ---
-                  // If Price is above Pivot, AND we haven't moved SL to Break-Even yet
-                  if (bid > Original_P)
+                  // --- TRIGGER 2: DEEP PROFIT (50% to R1) ---
+                  // Now we can tighten the stop because we are far away
+                  double distance = Original_R1 - Original_P;
+                  double triggerPrice_Late = Original_P + (distance * 0.5); 
+                  
+                  if (bid > triggerPrice_Late)
                   {
-                     double new_sl_stage1 = openPrice + (20 * _Point); // Break Even + 2 pips
-                     
-                     // Only move if our current SL is worse (lower) than Break Even
-                     if (new_sl_stage1 > sl + (_Point * 10))
+                     double new_sl = Original_P - (HardFloorBuffer * _Point); // Lock at Pivot
+                     if (new_sl > sl + (_Point * 10))
                      {
-                        trade.PositionModify(ticket, new_sl_stage1, PositionGetDouble(POSITION_TP));
-                        Print("Stage 1 Complete! Price hit Pivot. Moved SL to Break-Even (Risk Free).");
+                        trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
+                        Print("Hit 50% to Target. Locked remaining position at Pivot.");
                      }
                   }
                }
@@ -274,7 +281,25 @@ void ManageOpenPositions()
    }
 }
 
-//--- HELPERS
+//--- NEW HELPER: CHECK IF WE ALREADY SCALED OUT
+bool HasPartiallyClosed(ulong position_ticket)
+{
+   if(HistorySelectByPosition(position_ticket))
+   {
+      int total = HistoryDealsTotal();
+      for(int i=0; i<total; i++)
+      {
+         ulong deal_ticket = HistoryDealGetTicket(i);
+         long entry = HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+         
+         // If we find an "OUT" deal linked to this position, we have taken profit
+         if(entry == DEAL_ENTRY_OUT) return true;
+      }
+   }
+   return false;
+}
+
+//--- HELPERS (Standard)
 bool IsHighVolume()
 {
    long volumes[];
