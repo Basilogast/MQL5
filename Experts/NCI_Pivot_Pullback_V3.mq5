@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Pivot_Pro_Swing_V13.2_Phantom_Risk.mq5               |
+//|         NCI_Pivot_Pro_Swing_V13.3_Delayed_Stop.mq5               |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "13.20"
+#property version "13.30"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -144,58 +144,50 @@ void OnTick()
       if (Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return; 
    }
 
-   //--- EXECUTION LOGIC (WITH PHANTOM RISK MATH)
+   //--- EXECUTION LOGIC
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
    {
-      double execution_sl;  // The actual Stop Loss sent to Broker
-      double calculation_sl; // The Stop Loss used for Lot Size (Deep)
+      double execution_sl;  
+      double calculation_sl; 
       
       double dist_S1_S2_pips = (S1 - S2) / _Point / 10.0;
 
-      // 1. Determine Structural Basement (For Math)
       calculation_sl = S2 - (SafetyBuffer * _Point);
 
-      // 2. Determine Execution Stop (For Safety)
       if (dist_S1_S2_pips > CompressionThreshold)
       {
-          // High Volatility: Cut loss at Midpoint
           execution_sl = S1 - ((S1 - S2) / 2.0); 
-          Print("Using Midpoint Stop. Lot Size based on S2 (Phantom Risk).");
+          Print("High Volatility. Using Midpoint Stop (Phantom Risk).");
       }
       else
       {
-          // Compressed: Stop at S2
           execution_sl = S2 - (SafetyBuffer * _Point);
       }
 
       double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
-      
-      // R:R Check (Based on Execution SL)
       double risk = currentPrice - execution_sl;
       double reward = tp - currentPrice;
       if (risk > 0 && (reward/risk) < MinRiskReward) return; 
 
       Print("OPENING S1 BUY. Trigger: ", triggerType, " | Price: ", currentPrice);
       
-      string clean_comment = "S1_" + DoubleToString(P, 5); 
-      // PASS BOTH SL VALUES
+      // NEW: SAVE BOTH P AND R1 IN COMMENT FOR MANAGEMENT
+      // Format: "S1_PivotPrice_TargetPrice"
+      string clean_comment = "S1_" + DoubleToString(P, 5) + "_" + DoubleToString(R1, 5); 
       OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
    {
       double execution_sl;
       double calculation_sl;
-      
       double dist_S2_S3_pips = (S2 - S3) / _Point / 10.0;
 
-      // 1. Determine Structural Basement (For Math)
       calculation_sl = S3 - (SafetyBuffer * _Point);
 
-      // 2. Determine Execution Stop
       if (dist_S2_S3_pips > CompressionThreshold)
       {
           execution_sl = S2 - ((S2 - S3) / 2.0);
-          Print("Using Midpoint Stop. Lot Size based on S3 (Phantom Risk).");
+          Print("High Volatility. Using Midpoint Stop (Phantom Risk).");
       }
       else
       {
@@ -214,7 +206,7 @@ void OnTick()
    }
 }
 
-//--- MANAGEMENT (No Changes)
+//--- NEW: 50% CONFIRMATION MANAGEMENT LOGIC
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -226,19 +218,38 @@ void ManageOpenPositions()
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          string comment = PositionGetString(POSITION_COMMENT);
 
+         // Only S1 Buys need the "Pass P then Trail" logic
          if (StringFind(comment, "S1_") >= 0)
          {
-            string p_string = StringSubstr(comment, 3, 7); 
-            double Original_P = StringToDouble(p_string);
+            // PARSE THE COMMENT: "S1_1.35000_1.35500"
+            int first_sep = StringFind(comment, "_");
+            int second_sep = StringFind(comment, "_", first_sep + 1);
             
-            if (Original_P > 0)
+            if (first_sep > 0 && second_sep > 0)
             {
-               if (bid > Original_P)
+               string p_string = StringSubstr(comment, first_sep + 1, second_sep - first_sep - 1);
+               string r1_string = StringSubstr(comment, second_sep + 1);
+               
+               double Original_P = StringToDouble(p_string);
+               double Original_R1 = StringToDouble(r1_string);
+               
+               if (Original_P > 0 && Original_R1 > 0)
                {
-                  double new_floor = Original_P - (HardFloorBuffer * _Point); 
-                  if (new_floor > sl + (_Point * 10))
+                  // CALCULATE 50% TRIGGER LINE
+                  double distance = Original_R1 - Original_P;
+                  double triggerPrice = Original_P + (distance * 0.5); // Halfway to R1
+                  
+                  // LOGIC: Only move SL to P if we cross the 50% mark
+                  if (bid > triggerPrice)
                   {
-                     trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
+                     double new_floor = Original_P - (HardFloorBuffer * _Point); 
+                     
+                     // Move SL up only if it's an improvement
+                     if (new_floor > sl + (_Point * 10))
+                     {
+                        trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
+                        Print("Step Up! Price passed 50% to R1. Locked SL at Pivot.");
+                     }
                   }
                }
             }
@@ -300,14 +311,9 @@ void DrawSegment(string name, datetime t1, datetime t2, double price, color col,
    }
 }
 
-//--- UPDATED: OpenTrade now takes TWO stop losses
-// calc_sl: Used for Math (Distance to S2)
-// real_sl: Used for Broker (Midpoint)
 void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_sl, double tp)
 {
-   // 1. Calculate Lot Size based on the PHANTOM STOP (Deep S2/S3)
    double sl_distance_for_math = entry - calc_sl;
-   
    if (sl_distance_for_math <= 0) return;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -316,7 +322,6 @@ void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    
-   // This creates the smaller, safer lot size
    double lot_size = risk_money / ((sl_distance_for_math / tick_size) * tick_value);
    
    double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -326,7 +331,6 @@ void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_
    lot_size = MathFloor(lot_size / step) * step;
    lot_size = MathMax(min_lot, MathMin(max_lot, lot_size));
 
-   // 2. Execute Trade using the REAL STOP (Dynamic Midpoint)
    trade.Buy(lot_size, _Symbol, entry, real_sl, tp, comment);
 }
 
