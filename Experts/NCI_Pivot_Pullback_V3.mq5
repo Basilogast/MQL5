@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|             NCI_Pivot_Pro_Swing_V11.0_Knife_Protection.mq5       |
+//|             NCI_Pivot_Pro_Swing_V11.1_GreenBuffer.mq5            |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "11.00"
+#property version "11.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -23,11 +23,12 @@ input group "3. Entry Logic"
 input bool UseVolumeBurst   = true;  
 input double VolumeMultiplier = 1.2; 
 input double MinRiskReward  = 0.6;   
+input double GreenBufferPips = 0.0;  // NEW: Price must be 5 pips > Open to confirm Green
 
-//--- 4. KNIFE PROTECTION (NEW)
+//--- 4. KNIFE PROTECTION
 input group "4. Crash Protection"
-input bool AvoidFallingKnife = true; // Skip if drop is too violent?
-input double MaxCandleSizeATR = 2.0; // If drop candle is > 2x ATR, don't buy.
+input bool AvoidFallingKnife = true; 
+input double MaxCandleSizeATR = 2.0; 
 
 //--- 5. EXIT SETTINGS
 input group "5. Exit Settings"
@@ -48,7 +49,7 @@ input color Color_S1 = clrRed;
 input color Color_S2 = clrDarkRed;
 
 int TrendHandle;
-int ATRHandle; // NEW
+int ATRHandle; 
 CTrade trade;
 
 // Global Variables
@@ -59,7 +60,7 @@ int OnInit()
 {
    trade.SetExpertMagicNumber(555444);
    TrendHandle = iMA(_Symbol, _Period, TrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
-   ATRHandle   = iATR(_Symbol, _Period, 14); // Standard ATR
+   ATRHandle   = iATR(_Symbol, _Period, 14); 
    
    if (TrendHandle == INVALID_HANDLE || ATRHandle == INVALID_HANDLE) return INIT_FAILED;
    return INIT_SUCCEEDED;
@@ -103,25 +104,33 @@ void OnTick()
       if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) Signal_S2 = true;
    }
 
-   //--- VOLUME BURST ENTRY
+   //--- VOLUME BURST ENTRY (UPDATED WITH GREEN BUFFER)
    if (UseVolumeBurst && !Signal_S1 && !Signal_S2)
    {
       if (IsHighVolume())
       {
-         if (currentPrice > S1 && Open[0] < S1 && currentPrice > Open[0]) Signal_S1 = true;
-         if (currentPrice > S2 && Open[0] < S2 && currentPrice > Open[0]) Signal_S2 = true;
+         // Calculate the "Solid Green" Price Threshold
+         // Price must be at least Open + 5 pips to count as a burst
+         double solidGreenPrice = Open[0] + (GreenBufferPips * 10 * _Point);
+
+         // Logic: Current Price > S1 AND Price > SolidGreenThreshold
+         if (currentPrice > S1 && Open[0] < S1 && currentPrice > solidGreenPrice)
+         {
+            Signal_S1 = true;
+         }
+         if (currentPrice > S2 && Open[0] < S2 && currentPrice > solidGreenPrice)
+         {
+            Signal_S2 = true;
+         }
       }
    }
    
-   //--- NEW: KNIFE PROTECTION CHECK
-   // We look at Candle [1] (the completed one) or Candle [0] (current).
-   // If the body is HUGE, we assume panic.
+   //--- KNIFE PROTECTION CHECK
    if (AvoidFallingKnife)
    {
       double candleSize = High[1] - Low[1];
       double averageSize = ATR[1];
       
-      // If the candle before our entry was a monster drop
       if (Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR))
       {
          Print("Skipped Trade: Falling Knife Detected! Candle size: ", candleSize, " vs ATR: ", averageSize);
