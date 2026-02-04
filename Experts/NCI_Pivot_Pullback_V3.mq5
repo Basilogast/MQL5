@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|       NCI_Pivot_Pro_Swing_V15.4_MagnetDebug.mq5                  |
+//|       NCI_Pivot_Pro_Swing_V15.5_Robust_Management.mq5            |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "15.40"
+#property version "15.50"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -22,7 +22,7 @@ input bool Trade_R2 = true;
 
 //--- 3. ENTRY LOGIC
 input group "3. Entry Logic"
-input double MagnetPips     = 0.0;   // NEW: Tolerance for "Touching" the line
+input double MagnetPips     = 2.0;   // Tolerance for "Touching" the line
 input bool UseVolumeBurst   = true;  
 input double VolumeMultiplier = 1.2; 
 input double MinRiskReward  = 0.6;   
@@ -61,7 +61,7 @@ int TrendHandle;
 int ATRHandle; 
 CTrade trade;
 
-// Global Variables
+// Global Variables (For Display Only)
 double R1, R2, R3, P, S1, S2, S3; 
 datetime LastDay = 0;
 
@@ -77,7 +77,7 @@ int OnInit()
 
 void OnTick()
 {
-   CalculateDailyPivots();
+   CalculateDisplayPivots(); // Updated function name to clarify purpose
    ManageOpenPositions(); 
 
    if (!IsNewBar() && !UseVolumeBurst) return; 
@@ -109,66 +109,52 @@ void OnTick()
 
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK); 
    double currentBid   = SymbolInfoDouble(_Symbol, SYMBOL_BID); 
-   double magnet = MagnetPips * 10 * _Point; // Convert pips to points
+   double magnet = MagnetPips * 10 * _Point; 
 
    bool Signal_S1 = false, Signal_S2 = false;
    bool Signal_R1 = false, Signal_R2 = false;
    string triggerType = ""; 
 
-   //--- 1. STANDARD ENTRY (MAGNET + DEBUG)
+   //--- 1. STANDARD ENTRY
    if (IsNewBar())
    {
-      // --- BUY LOGIC (Low must be <= Level + Magnet) ---
-      
-      // S1 CHECK
+      // BUY LOGIC (S1)
       bool S1_Touch = (Low[1] <= S1 + magnet);
       bool S1_Green = (Close[1] > Open[1]);
       bool S1_Above = (Close[1] > S1);
-      
-      // Method A: One-Bar
       if (S1_Touch && S1_Green && S1_Above) { Signal_S1 = true; triggerType = "Candle Close"; }
       
-      // Method B: Two-Bar (Relaxed)
       bool S1_PrevTouch = (Low[2] <= S1 + magnet);
       if (!Signal_S1 && S1_PrevTouch && S1_Green && S1_Above) { Signal_S1 = true; triggerType = "Candle Close (2-Bar)"; }
       
-      // DEBUG PRINT FOR S1
-      if (S1_Touch && !Signal_S1 && !IsUptrend) Print("DEBUG SKIP S1: Touched Line, but Trend is DOWN.");
-      else if (S1_Touch && !Signal_S1 && !S1_Green) Print("DEBUG SKIP S1: Touched Line, but Candle RED.");
-      else if (S1_Touch && !Signal_S1 && !S1_Above) Print("DEBUG SKIP S1: Touched Line, but Failed to close ABOVE.");
+      if (S1_Touch && !Signal_S1) PrintDebug("S1", IsUptrend, S1_Green, S1_Above, "BUY");
 
-      // S2 CHECK
+      // BUY LOGIC (S2)
       bool S2_Touch = (Low[1] <= S2 + magnet);
       bool S2_Green = (Close[1] > Open[1]);
       bool S2_Above = (Close[1] > S2);
-      
       if (S2_Touch && S2_Green && S2_Above) { Signal_S2 = true; triggerType = "Candle Close"; }
+      
       bool S2_PrevTouch = (Low[2] <= S2 + magnet);
       if (!Signal_S2 && S2_PrevTouch && S2_Green && S2_Above) { Signal_S2 = true; triggerType = "Candle Close (2-Bar)"; }
 
-      // --- SELL LOGIC (High must be >= Level - Magnet) ---
-      
-      // R1 CHECK
+      // SELL LOGIC (R1)
       bool R1_Touch = (High[1] >= R1 - magnet);
       bool R1_Red   = (Close[1] < Open[1]);
       bool R1_Below = (Close[1] < R1);
-
       if (R1_Touch && R1_Red && R1_Below) { Signal_R1 = true; triggerType = "Candle Close"; }
       
       bool R1_PrevTouch = (High[2] >= R1 - magnet);
       if (!Signal_R1 && R1_PrevTouch && R1_Red && R1_Below) { Signal_R1 = true; triggerType = "Candle Close (2-Bar)"; }
 
-      // DEBUG PRINT FOR R1
-      if (R1_Touch && !Signal_R1 && !IsDowntrend) Print("DEBUG SKIP R1: Touched Line, but Trend is UP.");
-      else if (R1_Touch && !Signal_R1 && !R1_Red) Print("DEBUG SKIP R1: Touched Line, but Candle GREEN.");
-      else if (R1_Touch && !Signal_R1 && !R1_Below) Print("DEBUG SKIP R1: Touched Line, but Failed to close BELOW.");
+      if (R1_Touch && !Signal_R1) PrintDebug("R1", IsDowntrend, R1_Red, R1_Below, "SELL");
 
-      // R2 CHECK
+      // SELL LOGIC (R2)
       bool R2_Touch = (High[1] >= R2 - magnet);
       bool R2_Red   = (Close[1] < Open[1]);
       bool R2_Below = (Close[1] < R2);
-      
       if (R2_Touch && R2_Red && R2_Below) { Signal_R2 = true; triggerType = "Candle Close"; }
+      
       bool R2_PrevTouch = (High[2] >= R2 - magnet);
       if (!Signal_R2 && R2_PrevTouch && R2_Red && R2_Below) { Signal_R2 = true; triggerType = "Candle Close (2-Bar)"; }
    }
@@ -180,7 +166,6 @@ void OnTick()
       {
          // BUY BURST
          double solidGreen = Open[0] + (GreenBufferPips * 10 * _Point);
-         // Magnet not strictly needed for burst as it's a "crossing" logic, but applied for consistency if needed
          if (currentPrice > S1 && Open[0] < S1 + magnet && currentPrice > solidGreen) { Signal_S1 = true; triggerType = "Volume Burst"; }
          if (currentPrice > S2 && Open[0] < S2 + magnet && currentPrice > solidGreen) { Signal_S2 = true; triggerType = "Volume Burst"; }
 
@@ -191,7 +176,7 @@ void OnTick()
       }
    }
    
-   //--- 3. PROTECTION (DEBUG ADDED)
+   //--- 3. PROTECTION
    if (AvoidViolentMoves)
    {
       double candleSize = High[1] - Low[1];
@@ -215,10 +200,9 @@ void OnTick()
       if (Trade_S1 && Signal_S1) ProcessEntry(ORDER_TYPE_BUY, S1, S2, R1, P, triggerType, "S1");
       else if (Trade_S2 && Signal_S2) ProcessEntry(ORDER_TYPE_BUY, S2, S3, P, P, triggerType, "S2");
    }
-   // DEBUG: Signal present but Trend blocked execution?
    else if (PositionsTotal() < 1 && !IsUptrend && (Signal_S1 || Signal_S2))
    {
-      Print("DEBUG SKIP: Valid Buy Signal (S1/S2), but blocked by GLOBAL TREND FILTER (Close < EMA 200).");
+      Print("DEBUG SKIP: Buy blocked by GLOBAL TREND FILTER (Close < EMA 200).");
    }
 
    if (PositionsTotal() < 1 && IsDowntrend)
@@ -228,12 +212,126 @@ void OnTick()
    }
    else if (PositionsTotal() < 1 && !IsDowntrend && (Signal_R1 || Signal_R2))
    {
-      Print("DEBUG SKIP: Valid Sell Signal (R1/R2), but blocked by GLOBAL TREND FILTER (Close > EMA 200).");
+      Print("DEBUG SKIP: Sell blocked by GLOBAL TREND FILTER (Close > EMA 200).");
    }
 }
 
-// ... [Rest of functions: ProcessEntry, ManageOpenPositions, etc. remain unchanged] ...
+//--- NEW ROBUST MANAGEMENT (NO COMMENTS NEEDED)
+void ManageOpenPositions()
+{
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (PositionGetSymbol(i) == _Symbol)
+      {
+         ulong ticket = PositionGetInteger(POSITION_TICKET);
+         double sl = PositionGetDouble(POSITION_SL);
+         double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         datetime openTime = (datetime)PositionGetInteger(POSITION_TIME); // Get Entry Time
+         double vol = PositionGetDouble(POSITION_VOLUME);
+         long type = PositionGetInteger(POSITION_TYPE);
+         double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
+         // 1. RECONSTRUCT PIVOTS FROM HISTORY (Based on Entry Time)
+         double Rec_P, Rec_S1, Rec_S2, Rec_R1, Rec_R2;
+         if (!GetPivotsForTime(openTime, Rec_P, Rec_S1, Rec_S2, Rec_R1, Rec_R2)) continue;
+
+         // 2. IDENTIFY TRADE TYPE (By Proximity)
+         string tradeID = IdentifyTradeType(type, openPrice, Rec_S1, Rec_S2, Rec_R1, Rec_R2);
+         
+         double TargetLevel = 0;
+         double PivotLevel  = Rec_P;
+         
+         // 3. SET TARGETS
+         if (tradeID == "S1") TargetLevel = Rec_R1;
+         if (tradeID == "S2") TargetLevel = Rec_P;
+         if (tradeID == "R1") TargetLevel = Rec_S1;
+         if (tradeID == "R2") TargetLevel = Rec_P;
+         
+         if (TargetLevel == 0) continue; // Safety check
+
+         // 4. APPLY LOGIC
+         double dist = MathAbs(TargetLevel - PivotLevel);
+         bool hitPivot = false;
+         bool hit50 = false;
+         
+         if (type == POSITION_TYPE_BUY)
+         {
+             // Scale Out Trigger: Price > Pivot
+             if (currentBid > PivotLevel) hitPivot = true;
+             // Trail Trigger: Price > 50% way to Target
+             if (currentBid > (PivotLevel + dist * 0.5)) hit50 = true;
+             
+             if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
+             if (hit50)
+             {
+                 // Move Stop UP to Pivot (or Hard Floor)
+                 double new_sl = PivotLevel - (HardFloorBuffer * _Point);
+                 if (new_sl > sl + _Point) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
+             }
+         }
+         else if (type == POSITION_TYPE_SELL)
+         {
+             // Scale Out Trigger: Price < Pivot
+             if (currentAsk < PivotLevel) hitPivot = true;
+             // Trail Trigger: Price < 50% way to Target
+             if (currentAsk < (PivotLevel - dist * 0.5)) hit50 = true;
+             
+             if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
+             if (hit50)
+             {
+                 // Move Stop DOWN to Pivot (or Hard Floor)
+                 double new_sl = PivotLevel + (HardFloorBuffer * _Point);
+                 if (new_sl < sl - _Point || sl == 0) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
+             }
+         }
+      }
+   }
+}
+
+//--- NEW HELPER: RECONSTRUCT PIVOTS
+bool GetPivotsForTime(datetime entryTime, double &p, double &s1, double &s2, double &r1, double &r2)
+{
+   // Find the Day Index for the entry time
+   int shift = iBarShift(_Symbol, PERIOD_D1, entryTime);
+   if (shift < 0) return false;
+   
+   // Pivots are calculated from the PREVIOUS day relative to entry
+   // So we need High/Low/Close of (shift + 1)
+   double h = iHigh(_Symbol, PERIOD_D1, shift + 1);
+   double l = iLow(_Symbol, PERIOD_D1, shift + 1);
+   double c = iClose(_Symbol, PERIOD_D1, shift + 1);
+   
+   if (h == 0 || l == 0 || c == 0) return false;
+   
+   p = (h + l + c) / 3.0;
+   r1 = (2 * p) - l;
+   s1 = (2 * p) - h;
+   r2 = p + (h - l);
+   s2 = p - (h - l);
+   return true;
+}
+
+//--- NEW HELPER: IDENTIFY TRADE TYPE
+string IdentifyTradeType(long type, double entry, double s1, double s2, double r1, double r2)
+{
+   if (type == POSITION_TYPE_BUY)
+   {
+      double distS1 = MathAbs(entry - s1);
+      double distS2 = MathAbs(entry - s2);
+      if (distS1 < distS2) return "S1";
+      else return "S2";
+   }
+   else // SELL
+   {
+      double distR1 = MathAbs(entry - r1);
+      double distR2 = MathAbs(entry - r2);
+      if (distR1 < distR2) return "R1";
+      else return "R2";
+   }
+}
+
+//--- ENTRY PROCESSING
 void ProcessEntry(ENUM_ORDER_TYPE type, double level, double next_level, double target, double pivot, string trigger, string label)
 {
    double currentPrice = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -261,74 +359,13 @@ void ProcessEntry(ENUM_ORDER_TYPE type, double level, double next_level, double 
    double reward = MathAbs(tp - currentPrice);
    if (risk > 0 && (reward/risk) < MinRiskReward) return;
 
-   string clean_comment = label + "_" + DoubleToString(pivot, 5) + "_" + DoubleToString(target, 5); 
+   // Comment is less critical now, but we keep it for visual reference
+   string clean_comment = label + "_Entry"; 
    Print("OPENING ", label, " ", EnumToString(type), ". Type: ", trigger);
    OpenDynamicTrade(type, clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRisk);
 }
 
-void ManageOpenPositions()
-{
-   for (int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if (PositionGetSymbol(i) == _Symbol)
-      {
-         ulong ticket = PositionGetInteger(POSITION_TICKET);
-         double sl = PositionGetDouble(POSITION_SL);
-         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         double vol = PositionGetDouble(POSITION_VOLUME);
-         long type = PositionGetInteger(POSITION_TYPE);
-         string comment = PositionGetString(POSITION_COMMENT);
-
-         if (StringFind(comment, "_") > 0)
-         {
-            int first_sep = StringFind(comment, "_");
-            int second_sep = StringFind(comment, "_", first_sep + 1);
-            
-            if (first_sep > 0 && second_sep > 0)
-            {
-               string p_str = StringSubstr(comment, first_sep + 1, second_sep - first_sep - 1);
-               string t_str = StringSubstr(comment, second_sep + 1);
-               double Orig_P = StringToDouble(p_str);
-               double Orig_Target = StringToDouble(t_str);
-               
-               if (Orig_P > 0 && Orig_Target > 0)
-               {
-                  bool hitPivot = false;
-                  bool hit50 = false;
-                  double dist = MathAbs(Orig_Target - Orig_P);
-                  
-                  if (type == POSITION_TYPE_BUY)
-                  {
-                     if (bid > Orig_P) hitPivot = true;
-                     if (bid > (Orig_P + dist * 0.5)) hit50 = true;
-                     
-                     if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
-                     if (hit50) 
-                     {
-                        double new_sl = Orig_P - (HardFloorBuffer * _Point);
-                        if (new_sl > sl + _Point) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
-                     }
-                  }
-                  else if (type == POSITION_TYPE_SELL)
-                  {
-                     if (ask < Orig_P) hitPivot = true; 
-                     if (ask < (Orig_P - dist * 0.5)) hit50 = true; 
-                     
-                     if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
-                     if (hit50)
-                     {
-                        double new_sl = Orig_P + (HardFloorBuffer * _Point); 
-                        if (new_sl < sl - _Point || sl == 0) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
-}
-
+//--- HELPERS
 void DoScaleOut(ulong ticket, double vol)
 {
    double min_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -363,7 +400,7 @@ bool IsHighVolume()
    return ((double)volumes[0] > (average * VolumeMultiplier));
 }
 
-void CalculateDailyPivots()
+void CalculateDisplayPivots()
 {
    datetime currentDay = iTime(_Symbol, PERIOD_D1, 0);
    if (LastDay != currentDay)
@@ -422,6 +459,13 @@ void OpenDynamicTrade(ENUM_ORDER_TYPE type, string comment, double entry, double
 
    if (type == ORDER_TYPE_BUY) trade.Buy(lot, _Symbol, entry, real_sl, tp, comment);
    else trade.Sell(lot, _Symbol, entry, real_sl, tp, comment);
+}
+
+void PrintDebug(string level, bool trendOk, bool colorOk, bool closeOk, string type)
+{
+   if(!trendOk) Print("DEBUG SKIP ", level, ": Touched Line, but Trend Filter Blocked.");
+   else if(!colorOk) Print("DEBUG SKIP ", level, ": Touched Line, but Candle Color Wrong.");
+   else if(!closeOk) Print("DEBUG SKIP ", level, ": Touched Line, but Failed to close past line.");
 }
 
 bool IsNewBar()
