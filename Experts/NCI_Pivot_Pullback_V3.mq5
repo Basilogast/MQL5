@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Pivot_Pro_Swing_V13.3_Delayed_Stop.mq5               |
+//|         NCI_Pivot_Pro_Swing_V13.4_Split_Risk.mq5                 |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "13.30"
+#property version "13.40"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -41,9 +41,10 @@ input bool UseStructuralTarget = true;
 input double HardFloorBuffer   = 50;   
 input double BackupTP_Pips     = 300;   
 
-//--- 7. RISK MANAGEMENT
-input group "7. Structural Risk"
-input double RiskPercent    = 1.0;   
+//--- 7. SPLIT RISK MANAGEMENT (NEW)
+input group "7. Risk Profiles"
+input double RiskPercent_Standard = 1.0; // For Candle Close (High Confidence)
+input double RiskPercent_Burst    = 0.5; // For Volume Burst (Aggressive)
 
 //--- 8. VISUAL SETTINGS
 input bool ShowLines = true;      
@@ -147,6 +148,9 @@ void OnTick()
    //--- EXECUTION LOGIC
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
    {
+      // 1. DETERMINE RISK PROFILE
+      double activeRiskPercent = (triggerType == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
+
       double execution_sl;  
       double calculation_sl; 
       
@@ -157,11 +161,12 @@ void OnTick()
       if (dist_S1_S2_pips > CompressionThreshold)
       {
           execution_sl = S1 - ((S1 - S2) / 2.0); 
-          Print("High Volatility. Using Midpoint Stop (Phantom Risk).");
+          Print("S1 Buy (High Volatility). Midpoint Stop. Risk: ", activeRiskPercent, "%");
       }
       else
       {
           execution_sl = S2 - (SafetyBuffer * _Point);
+          Print("S1 Buy (Standard). S2 Stop. Risk: ", activeRiskPercent, "%");
       }
 
       double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
@@ -169,15 +174,17 @@ void OnTick()
       double reward = tp - currentPrice;
       if (risk > 0 && (reward/risk) < MinRiskReward) return; 
 
-      Print("OPENING S1 BUY. Trigger: ", triggerType, " | Price: ", currentPrice);
+      Print("OPENING S1. Type: ", triggerType);
       
-      // NEW: SAVE BOTH P AND R1 IN COMMENT FOR MANAGEMENT
-      // Format: "S1_PivotPrice_TargetPrice"
       string clean_comment = "S1_" + DoubleToString(P, 5) + "_" + DoubleToString(R1, 5); 
-      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp);
+      // Pass the activeRiskPercent to the function
+      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRiskPercent);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
    {
+      // 1. DETERMINE RISK PROFILE
+      double activeRiskPercent = (triggerType == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
+
       double execution_sl;
       double calculation_sl;
       double dist_S2_S3_pips = (S2 - S3) / _Point / 10.0;
@@ -187,11 +194,12 @@ void OnTick()
       if (dist_S2_S3_pips > CompressionThreshold)
       {
           execution_sl = S2 - ((S2 - S3) / 2.0);
-          Print("High Volatility. Using Midpoint Stop (Phantom Risk).");
+          Print("S2 Buy (High Volatility). Midpoint Stop. Risk: ", activeRiskPercent, "%");
       }
       else
       {
           execution_sl = S3 - (SafetyBuffer * _Point);
+          Print("S2 Buy (Standard). S3 Stop. Risk: ", activeRiskPercent, "%");
       }
 
       double tp = UseStructuralTarget ? P : (currentPrice + BackupTP_Pips * _Point);
@@ -199,14 +207,14 @@ void OnTick()
       double reward = tp - currentPrice;
       if (risk > 0 && (reward/risk) < MinRiskReward) return; 
 
-      Print("OPENING S2 BUY. Trigger: ", triggerType, " | Price: ", currentPrice);
+      Print("OPENING S2. Type: ", triggerType);
       
       string clean_comment = "S2_" + DoubleToString(P, 5);
-      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp);
+      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRiskPercent);
    }
 }
 
-//--- NEW: 50% CONFIRMATION MANAGEMENT LOGIC
+//--- MANAGEMENT (50% Confirmation Rule)
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -218,10 +226,8 @@ void ManageOpenPositions()
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          string comment = PositionGetString(POSITION_COMMENT);
 
-         // Only S1 Buys need the "Pass P then Trail" logic
          if (StringFind(comment, "S1_") >= 0)
          {
-            // PARSE THE COMMENT: "S1_1.35000_1.35500"
             int first_sep = StringFind(comment, "_");
             int second_sep = StringFind(comment, "_", first_sep + 1);
             
@@ -235,16 +241,12 @@ void ManageOpenPositions()
                
                if (Original_P > 0 && Original_R1 > 0)
                {
-                  // CALCULATE 50% TRIGGER LINE
                   double distance = Original_R1 - Original_P;
-                  double triggerPrice = Original_P + (distance * 0.5); // Halfway to R1
+                  double triggerPrice = Original_P + (distance * 0.5); 
                   
-                  // LOGIC: Only move SL to P if we cross the 50% mark
                   if (bid > triggerPrice)
                   {
                      double new_floor = Original_P - (HardFloorBuffer * _Point); 
-                     
-                     // Move SL up only if it's an improvement
                      if (new_floor > sl + (_Point * 10))
                      {
                         trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
@@ -311,13 +313,16 @@ void DrawSegment(string name, datetime t1, datetime t2, double price, color col,
    }
 }
 
-void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_sl, double tp)
+//--- UPDATED: Accepts specific Risk Percent
+void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_sl, double tp, double active_risk_pct)
 {
    double sl_distance_for_math = entry - calc_sl;
    if (sl_distance_for_math <= 0) return;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double risk_money = balance * (RiskPercent / 100.0);
+   
+   // USE THE PASSED RISK PERCENTAGE (0.5% or 1.0%)
+   double risk_money = balance * (active_risk_pct / 100.0);
    
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
