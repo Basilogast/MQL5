@@ -1,26 +1,33 @@
 //+------------------------------------------------------------------+
-//|                                     NCI_Pivot_Pullback_V3.0.mq5  |
+//|                            NCI_Pivot_Pullback_V3.2_History.mq5   |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "3.00"
+#property version "3.20"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 //--- 1. TREND SETTINGS
 input group "1. Trend Settings"
-input int TrendEMA_Period = 200;    // Filter: Only buy above this line
+input int TrendEMA_Period = 200;
 
-//--- 2. PIVOT SETTINGS (Automated Key Levels)
+//--- 2. PIVOT SETTINGS
 input group "2. Pivot Settings"
-input bool Trade_S1 = true;         // Trade bounces off Support 1?
-input bool Trade_S2 = true;         // Trade bounces off Support 2 (Deep)?
+input bool Trade_S1 = true;
+input bool Trade_S2 = true;
 
-//--- 3. RISK MANAGEMENT
-input group "3. Risk Management"
+//--- 3. VISUAL SETTINGS
+input group "3. Visual Debugging"
+input bool ShowLines = true;      
+input color Color_P  = clrBlue;   
+input color Color_S1 = clrRed;    
+input color Color_S2 = clrDarkRed;
+
+//--- 4. RISK MANAGEMENT
+input group "4. Risk Management"
 input double RiskPercent    = 1.0;
-input double StopLossPips   = 100;  // Fixed SL (Or place below S2)
+input double StopLossPips   = 100;
 input double TakeProfitPips = 300;
 input int BreakEvenPips     = 100;
 input int TrailingPips      = 150;
@@ -28,23 +35,23 @@ input int TrailingPips      = 150;
 int TrendHandle;
 CTrade trade;
 
-// Global Variables to store Daily Levels
-double P, S1, S2, R1, R2;
+// Global Variables
+double P, S1, S2;
 datetime LastDay = 0;
 
 int OnInit()
 {
-   trade.SetExpertMagicNumber(555444); // New Magic Number
-
+   trade.SetExpertMagicNumber(555444);
    TrendHandle = iMA(_Symbol, _Period, TrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
-   
    return (TrendHandle == INVALID_HANDLE) ? INIT_FAILED : INIT_SUCCEEDED;
 }
+
+// NOTE: We REMOVED OnDeinit() so lines stay on the chart!
 
 void OnTick()
 {
    ManageOpenPositions();
-   CalculateDailyPivots(); // Update levels if it's a new day
+   CalculateDailyPivots();
 
    if (!IsNewBar()) return;
 
@@ -63,34 +70,23 @@ void OnTick()
 
    //--- STRATEGY LOGIC -------------------------------------------
 
-   // 1. TREND FILTER (Cornerstone)
    bool IsUptrend = (Close[1] > TrendMA[1]);
-
-   // 2. LEVEL INTERACTION (Did we touch the line?)
-   // We check if the LOW of the candle went below the line, 
-   // but the CLOSE stayed above it (Rejecting the level).
-   
-   bool TouchedS1 = (Low[1] <= S1 && Close[1] > S1); // Wick went through S1
-   bool TouchedS2 = (Low[1] <= S2 && Close[1] > S2); // Wick went through S2
-   
-   // 3. CONFIRMATION (Green Candle Bounce)
+   bool TouchedS1 = (Low[1] <= S1 && Close[1] > S1); 
+   bool TouchedS2 = (Low[1] <= S2 && Close[1] > S2); 
    bool GreenCandle = (Close[1] > Open[1]);
 
    //--- ENTRY EXECUTION
-   // Scenario A: Bounce off S1
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && TouchedS1 && GreenCandle)
    {
       OpenTrade("Pivot S1 Bounce");
    }
-   
-   // Scenario B: Bounce off S2 (Deep Discount)
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && TouchedS2 && GreenCandle)
    {
       OpenTrade("Pivot S2 Deep Bounce");
    }
 }
 
-//--- CALCULATE PIVOTS (The "Floor Trader" Math)
+//--- CALCULATE & DRAW PIVOTS (HISTORY MODE)
 void CalculateDailyPivots()
 {
    datetime currentDay = iTime(_Symbol, PERIOD_D1, 0);
@@ -103,13 +99,36 @@ void CalculateDailyPivots()
       double low  = iLow(_Symbol, PERIOD_D1, 1);
       double close= iClose(_Symbol, PERIOD_D1, 1);
       
-      // Standard Pivot Formulas
+      // Calculate
       P = (high + low + close) / 3.0;
       S1 = (2 * P) - high;
       S2 = P - (high - low);
-      R1 = (2 * P) - low;
       
-      Print("New Daily Levels -> P: ", P, " S1: ", S1, " S2: ", S2);
+      // DRAW PERMANENT HISTORY LINES
+      if (ShowLines)
+      {
+         // Calculate End of Day time (start + 24 hours)
+         datetime endOfDay = currentDay + 86400; 
+         
+         // Draw unique segments for this specific day
+         DrawSegment("P_" + TimeToString(currentDay), currentDay, endOfDay, P, Color_P, STYLE_SOLID);
+         DrawSegment("S1_" + TimeToString(currentDay), currentDay, endOfDay, S1, Color_S1, STYLE_SOLID);
+         DrawSegment("S2_" + TimeToString(currentDay), currentDay, endOfDay, S2, Color_S2, STYLE_DASH);
+      }
+   }
+}
+
+//--- HELPER: DRAW SEGMENT (Start to End Time)
+void DrawSegment(string name, datetime t1, datetime t2, double price, color col, ENUM_LINE_STYLE style)
+{
+   if (ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TREND, 0, t1, price, t2, price);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
+      ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false); // Do not extend to infinity
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    }
 }
 
@@ -120,7 +139,6 @@ void OpenTrade(string comment)
    trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), comment);
 }
 
-//--- STANDARD HELPER FUNCTIONS ----------------------------------
 double CalculateLotSize(double sl_pips)
 {
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
