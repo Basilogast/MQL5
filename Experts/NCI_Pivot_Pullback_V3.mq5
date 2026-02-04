@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Pivot_Pro_Swing_V13.6_ScaleOut.mq5                   |
+//|           NCI_Pivot_Pro_Swing_V15.0_Full_Cycle.mq5               |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "13.60"
+#property version "15.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -15,8 +15,10 @@ input int TrendEMA_Period   = 200;
 
 //--- 2. PIVOT SETTINGS
 input group "2. Pivot Settings"
-input bool Trade_S1 = true;
-input bool Trade_S2 = true;
+input bool Trade_S1 = true; // Buy Support 1
+input bool Trade_S2 = true; // Buy Support 2
+input bool Trade_R1 = true; // NEW: Sell Resistance 1
+input bool Trade_R2 = true; // NEW: Sell Resistance 2
 
 //--- 3. ENTRY LOGIC
 input group "3. Entry Logic"
@@ -26,8 +28,8 @@ input double MinRiskReward  = 0.6;
 input double GreenBufferPips = 0.0;  
 
 //--- 4. PROTECTION
-input group "4. Crash Protection"
-input bool AvoidFallingKnife = true; 
+input group "4. Crash/Rocket Protection"
+input bool AvoidViolentMoves = true; // Skip Falling Knife (Buy) or Rocket (Sell)
 input double MaxCandleSizeATR = 2.0; 
 
 //--- 5. DYNAMIC STOP LOSS
@@ -58,7 +60,7 @@ int ATRHandle;
 CTrade trade;
 
 // Global Variables
-double R1, P, S1, S2, S3; 
+double R1, R2, R3, P, S1, S2, S3; 
 datetime LastDay = 0;
 
 int OnInit()
@@ -94,121 +96,139 @@ void OnTick()
        CopyHigh(_Symbol, _Period, 0, 3, High) < 3)
       return;
 
-   //--- TREND
+   //--- TREND DIRECTION
    bool IsUptrend = true;
-   if (UseTrendFilter) IsUptrend = (Close[1] > TrendMA[1]);
-
-   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   bool Signal_S1 = false;
-   bool Signal_S2 = false;
-   string triggerType = ""; 
-
-   //--- STANDARD ENTRY
-   if (IsNewBar())
+   bool IsDowntrend = true;
+   if (UseTrendFilter) 
    {
-      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) 
-      {
-         Signal_S1 = true;
-         triggerType = "Candle Close";
-      }
-      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) 
-      {
-         Signal_S2 = true;
-         triggerType = "Candle Close";
-      }
+      IsUptrend   = (Close[1] > TrendMA[1]);
+      IsDowntrend = (Close[1] < TrendMA[1]);
    }
 
-   //--- VOLUME BURST ENTRY
-   if (UseVolumeBurst && !Signal_S1 && !Signal_S2)
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK); // Buy Price
+   double currentBid   = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Sell Price
+
+   // SIGNALS
+   bool Signal_S1 = false, Signal_S2 = false;
+   bool Signal_R1 = false, Signal_R2 = false;
+   string triggerType = ""; 
+
+   //--- 1. STANDARD ENTRY (Candle Close)
+   if (IsNewBar())
+   {
+      // BUY LOGIC (Bounce off Support)
+      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) { Signal_S1 = true; triggerType = "Candle Close"; }
+      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) { Signal_S2 = true; triggerType = "Candle Close"; }
+
+      // SELL LOGIC (Bounce off Resistance)
+      // High touched R1/R2, but Close is BELOW it (Red Candle)
+      if (High[1] >= R1 && Close[1] < R1 && Close[1] < Open[1]) { Signal_R1 = true; triggerType = "Candle Close"; }
+      if (High[1] >= R2 && Close[1] < R2 && Close[1] < Open[1]) { Signal_R2 = true; triggerType = "Candle Close"; }
+   }
+
+   //--- 2. VOLUME BURST ENTRY (Mid-Candle)
+   if (UseVolumeBurst && !Signal_S1 && !Signal_S2 && !Signal_R1 && !Signal_R2)
    {
       if (IsHighVolume())
       {
-         double solidGreenPrice = Open[0] + (GreenBufferPips * 10 * _Point);
-         if (currentPrice > S1 && Open[0] < S1 && currentPrice > solidGreenPrice)
-         {
-            Signal_S1 = true;
-            triggerType = "Volume Burst";
-         }
-         if (currentPrice > S2 && Open[0] < S2 && currentPrice > solidGreenPrice)
-         {
-            Signal_S2 = true;
-            triggerType = "Volume Burst";
-         }
+         // BUY BURST
+         double solidGreen = Open[0] + (GreenBufferPips * 10 * _Point);
+         if (currentPrice > S1 && Open[0] < S1 && currentPrice > solidGreen) { Signal_S1 = true; triggerType = "Volume Burst"; }
+         if (currentPrice > S2 && Open[0] < S2 && currentPrice > solidGreen) { Signal_S2 = true; triggerType = "Volume Burst"; }
+
+         // SELL BURST (Inverted)
+         // Open was ABOVE Line, Price is now BELOW Line (and Red)
+         double solidRed = Open[0] - (GreenBufferPips * 10 * _Point);
+         if (currentBid < R1 && Open[0] > R1 && currentBid < solidRed) { Signal_R1 = true; triggerType = "Volume Burst"; }
+         if (currentBid < R2 && Open[0] > R2 && currentBid < solidRed) { Signal_R2 = true; triggerType = "Volume Burst"; }
       }
    }
    
-   //--- KNIFE PROTECTION
-   if (AvoidFallingKnife)
+   //--- 3. PROTECTION (Violent Move Filter)
+   if (AvoidViolentMoves)
    {
       double candleSize = High[1] - Low[1];
       double averageSize = ATR[1];
-      if (Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return; 
+      
+      // If BUYING, avoid Falling Knife (Huge Red Candle)
+      if ((Signal_S1 || Signal_S2) && Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return;
+
+      // If SELLING, avoid Rocket Launch (Huge Green Candle)
+      if ((Signal_R1 || Signal_R2) && Close[1] > Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return;
    }
 
-   //--- EXECUTION LOGIC
-   if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
+   //=========================================================
+   // BUY EXECUTION (S1 & S2)
+   //=========================================================
+   if (PositionsTotal() < 1 && IsUptrend)
    {
-      double activeRiskPercent = (triggerType == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
-
-      double execution_sl;  
-      double calculation_sl; 
-      double dist_S1_S2_pips = (S1 - S2) / _Point / 10.0;
-
-      calculation_sl = S2 - (SafetyBuffer * _Point);
-
-      if (dist_S1_S2_pips > CompressionThreshold)
+      if (Trade_S1 && Signal_S1)
       {
-          execution_sl = S1 - ((S1 - S2) / 2.0); 
-          Print("S1 Buy (High Volatility). Midpoint Stop. Risk: ", activeRiskPercent, "%");
+         ProcessEntry(ORDER_TYPE_BUY, S1, S2, R1, P, triggerType, "S1");
       }
-      else
+      else if (Trade_S2 && Signal_S2)
       {
-          execution_sl = S2 - (SafetyBuffer * _Point);
-          Print("S1 Buy (Standard). S2 Stop. Risk: ", activeRiskPercent, "%");
+         ProcessEntry(ORDER_TYPE_BUY, S2, S3, P, P, triggerType, "S2");
       }
-
-      double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
-      double risk = currentPrice - execution_sl;
-      double reward = tp - currentPrice;
-      if (risk > 0 && (reward/risk) < MinRiskReward) return; 
-
-      Print("OPENING S1. Type: ", triggerType);
-      string clean_comment = "S1_" + DoubleToString(P, 5) + "_" + DoubleToString(R1, 5); 
-      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRiskPercent);
    }
-   else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
+
+   //=========================================================
+   // SELL EXECUTION (R1 & R2)
+   //=========================================================
+   if (PositionsTotal() < 1 && IsDowntrend)
    {
-      double activeRiskPercent = (triggerType == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
-
-      double execution_sl;
-      double calculation_sl;
-      double dist_S2_S3_pips = (S2 - S3) / _Point / 10.0;
-
-      calculation_sl = S3 - (SafetyBuffer * _Point);
-
-      if (dist_S2_S3_pips > CompressionThreshold)
+      if (Trade_R1 && Signal_R1)
       {
-          execution_sl = S2 - ((S2 - S3) / 2.0);
-          Print("S2 Buy (High Volatility). Midpoint Stop. Risk: ", activeRiskPercent, "%");
+         // Sell at R1 -> Stop R2 -> Target S1
+         ProcessEntry(ORDER_TYPE_SELL, R1, R2, S1, P, triggerType, "R1");
       }
-      else
+      else if (Trade_R2 && Signal_R2)
       {
-          execution_sl = S3 - (SafetyBuffer * _Point);
-          Print("S2 Buy (Standard). S3 Stop. Risk: ", activeRiskPercent, "%");
+         // Sell at R2 -> Stop R3 -> Target P
+         ProcessEntry(ORDER_TYPE_SELL, R2, R3, P, P, triggerType, "R2");
       }
-
-      double tp = UseStructuralTarget ? P : (currentPrice + BackupTP_Pips * _Point);
-      double risk = currentPrice - execution_sl;
-      double reward = tp - currentPrice;
-      if (risk > 0 && (reward/risk) < MinRiskReward) return; 
-
-      Print("OPENING S2. Type: ", triggerType);
-      string clean_comment = "S2_" + DoubleToString(P, 5);
-      OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRiskPercent);
    }
 }
 
-//--- MANAGEMENT: SCALE OUT AT PIVOT
+//--- NEW: UNIFIED ENTRY PROCESSOR (Handles both Buy & Sell math)
+void ProcessEntry(ENUM_ORDER_TYPE type, double level, double next_level, double target, double pivot, string trigger, string label)
+{
+   double currentPrice = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double activeRisk = (trigger == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
+   
+   double dist_pips = MathAbs(level - next_level) / _Point / 10.0;
+   double execution_sl, calculation_sl;
+
+   // 1. Calculate Stops
+   if (type == ORDER_TYPE_BUY)
+   {
+      calculation_sl = next_level - (SafetyBuffer * _Point); // Deep Stop
+      if (dist_pips > CompressionThreshold) execution_sl = level - ((level - next_level) / 2.0); // Midpoint
+      else execution_sl = calculation_sl;
+   }
+   else // SELL
+   {
+      calculation_sl = next_level + (SafetyBuffer * _Point); // Deep Stop (Above Attic)
+      if (dist_pips > CompressionThreshold) execution_sl = level + ((next_level - level) / 2.0); // Midpoint
+      else execution_sl = calculation_sl;
+   }
+
+   // 2. Target
+   double tp = UseStructuralTarget ? target : (type == ORDER_TYPE_BUY ? currentPrice + BackupTP_Pips*_Point : currentPrice - BackupTP_Pips*_Point);
+
+   // 3. R:R Check
+   double risk = MathAbs(currentPrice - execution_sl);
+   double reward = MathAbs(tp - currentPrice);
+   if (risk > 0 && (reward/risk) < MinRiskReward) return;
+
+   // 4. Comment Generation: "Type_Pivot_Target"
+   string clean_comment = label + "_" + DoubleToString(pivot, 5) + "_" + DoubleToString(target, 5); 
+   
+   Print("OPENING ", label, " ", EnumToString(type), ". Type: ", trigger);
+   OpenDynamicTrade(type, clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRisk);
+}
+
+//--- MANAGEMENT: SCALE OUT AT PIVOT (Works for Buys & Sells)
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -218,60 +238,58 @@ void ManageOpenPositions()
          ulong ticket = PositionGetInteger(POSITION_TICKET);
          double sl = PositionGetDouble(POSITION_SL);
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
          double vol = PositionGetDouble(POSITION_VOLUME);
+         long type = PositionGetInteger(POSITION_TYPE);
          string comment = PositionGetString(POSITION_COMMENT);
 
-         if (StringFind(comment, "S1_") >= 0)
+         // Helper to parse comments like "S1_1.3000_1.3050" or "R1_1.3000_1.2950"
+         if (StringFind(comment, "_") > 0)
          {
             int first_sep = StringFind(comment, "_");
             int second_sep = StringFind(comment, "_", first_sep + 1);
             
             if (first_sep > 0 && second_sep > 0)
             {
-               string p_string = StringSubstr(comment, first_sep + 1, second_sep - first_sep - 1);
-               string r1_string = StringSubstr(comment, second_sep + 1);
+               string p_str = StringSubstr(comment, first_sep + 1, second_sep - first_sep - 1);
+               string t_str = StringSubstr(comment, second_sep + 1);
+               double Orig_P = StringToDouble(p_str);
+               double Orig_Target = StringToDouble(t_str);
                
-               double Original_P = StringToDouble(p_string);
-               double Original_R1 = StringToDouble(r1_string);
-               
-               if (Original_P > 0 && Original_R1 > 0)
+               if (Orig_P > 0 && Orig_Target > 0)
                {
-                  // --- TRIGGER 1: HIT PIVOT (SCALE OUT 50%) ---
-                  if (bid > Original_P)
+                  bool hitPivot = false;
+                  bool hit50 = false;
+                  double dist = MathAbs(Orig_Target - Orig_P);
+                  
+                  // --- BUY LOGIC ---
+                  if (type == POSITION_TYPE_BUY)
                   {
-                     // Check if we already scaled out by looking at history
-                     if (!HasPartiallyClosed(ticket))
+                     if (bid > Orig_P) hitPivot = true;
+                     if (bid > (Orig_P + dist * 0.5)) hit50 = true;
+                     
+                     // 1. Scale Out
+                     if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
+                     // 2. Lock Profit at Pivot (at 50%)
+                     if (hit50) 
                      {
-                        // Check if volume is large enough to split
-                        double min_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-                        if (vol > min_vol)
-                        {
-                           double half_vol = vol / 2.0;
-                           // Round to nearest step
-                           double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-                           half_vol = MathFloor(half_vol / step) * step;
-                           
-                           if (half_vol >= min_vol)
-                           {
-                              trade.PositionClosePartial(ticket, half_vol);
-                              Print("Hit Pivot! Scaled Out 50% Profit. Keeping SL at original location.");
-                           }
-                        }
+                        double new_sl = Orig_P - (HardFloorBuffer * _Point);
+                        if (new_sl > sl + _Point) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
                      }
                   }
-
-                  // --- TRIGGER 2: DEEP PROFIT (50% to R1) ---
-                  // Now we can tighten the stop because we are far away
-                  double distance = Original_R1 - Original_P;
-                  double triggerPrice_Late = Original_P + (distance * 0.5); 
-                  
-                  if (bid > triggerPrice_Late)
+                  // --- SELL LOGIC ---
+                  else if (type == POSITION_TYPE_SELL)
                   {
-                     double new_sl = Original_P - (HardFloorBuffer * _Point); // Lock at Pivot
-                     if (new_sl > sl + (_Point * 10))
+                     if (ask < Orig_P) hitPivot = true; // Price dropped below Pivot
+                     if (ask < (Orig_P - dist * 0.5)) hit50 = true; // Dropped 50% to target
+                     
+                     // 1. Scale Out
+                     if (hitPivot && !HasPartiallyClosed(ticket)) DoScaleOut(ticket, vol);
+                     // 2. Lock Profit at Pivot (at 50%)
+                     if (hit50)
                      {
-                        trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
-                        Print("Hit 50% to Target. Locked remaining position at Pivot.");
+                        double new_sl = Orig_P + (HardFloorBuffer * _Point); // Stop goes DOWN to Pivot
+                        if (new_sl < sl - _Point || sl == 0) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
                      }
                   }
                }
@@ -281,25 +299,30 @@ void ManageOpenPositions()
    }
 }
 
-//--- NEW HELPER: CHECK IF WE ALREADY SCALED OUT
+//--- HELPERS
+void DoScaleOut(ulong ticket, double vol)
+{
+   double min_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   if (vol > min_vol)
+   {
+      double half = MathFloor((vol/2.0) / SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)) * SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+      if (half >= min_vol) {
+         trade.PositionClosePartial(ticket, half);
+         Print("Hit Pivot! Scaled Out 50%.");
+      }
+   }
+}
+
 bool HasPartiallyClosed(ulong position_ticket)
 {
    if(HistorySelectByPosition(position_ticket))
    {
-      int total = HistoryDealsTotal();
-      for(int i=0; i<total; i++)
-      {
-         ulong deal_ticket = HistoryDealGetTicket(i);
-         long entry = HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
-         
-         // If we find an "OUT" deal linked to this position, we have taken profit
-         if(entry == DEAL_ENTRY_OUT) return true;
-      }
+      for(int i=0; i<HistoryDealsTotal(); i++)
+         if(HistoryDealGetInteger(HistoryDealGetTicket(i), DEAL_ENTRY) == DEAL_ENTRY_OUT) return true;
    }
    return false;
 }
 
-//--- HELPERS (Standard)
 bool IsHighVolume()
 {
    long volumes[];
@@ -308,8 +331,7 @@ bool IsHighVolume()
    double total = 0;
    for(int i=1; i<=20; i++) total += (double)volumes[i]; 
    double average = total / 20.0;
-   if ((double)volumes[0] > (average * VolumeMultiplier)) return true;
-   return false;
+   return ((double)volumes[0] > (average * VolumeMultiplier));
 }
 
 void CalculateDailyPivots()
@@ -327,22 +349,23 @@ void CalculateDailyPivots()
       S2 = P - (high - low);
       S3 = low - 2 * (high - P); 
       R1 = (2 * P) - low; 
+      R2 = P + (high - low); // Standard R2 Formula
+      R3 = high + 2 * (P - low);
       
       if (ShowLines)
       {
-         datetime endOfDay = currentDay + 86400; 
-         DrawSegment("R1_" + TimeToString(currentDay), currentDay, endOfDay, R1, Color_R1, STYLE_SOLID);
-         DrawSegment("P_" + TimeToString(currentDay), currentDay, endOfDay, P, Color_P, STYLE_SOLID);
-         DrawSegment("S1_" + TimeToString(currentDay), currentDay, endOfDay, S1, Color_S1, STYLE_SOLID);
-         DrawSegment("S2_" + TimeToString(currentDay), currentDay, endOfDay, S2, Color_S2, STYLE_DASH);
+         datetime end = currentDay + 86400; 
+         DrawSegment("R1_"+TimeToString(currentDay), currentDay, end, R1, Color_R1, STYLE_SOLID);
+         DrawSegment("P_"+TimeToString(currentDay), currentDay, end, P, Color_P, STYLE_SOLID);
+         DrawSegment("S1_"+TimeToString(currentDay), currentDay, end, S1, Color_S1, STYLE_SOLID);
+         DrawSegment("S2_"+TimeToString(currentDay), currentDay, end, S2, Color_S2, STYLE_DASH);
       }
    }
 }
 
 void DrawSegment(string name, datetime t1, datetime t2, double price, color col, ENUM_LINE_STYLE style)
 {
-   if (ObjectFind(0, name) < 0)
-   {
+   if (ObjectFind(0, name) < 0) {
       ObjectCreate(0, name, OBJ_TREND, 0, t1, price, t2, price);
       ObjectSetInteger(0, name, OBJPROP_COLOR, col);
       ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
@@ -352,34 +375,30 @@ void DrawSegment(string name, datetime t1, datetime t2, double price, color col,
    }
 }
 
-void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_sl, double tp, double active_risk_pct)
+void OpenDynamicTrade(ENUM_ORDER_TYPE type, string comment, double entry, double calc_sl, double real_sl, double tp, double risk_pct)
 {
-   double sl_distance_for_math = entry - calc_sl;
-   if (sl_distance_for_math <= 0) return;
+   double sl_dist = MathAbs(entry - calc_sl);
+   if (sl_dist <= 0) return;
 
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double risk_money = balance * (active_risk_pct / 100.0);
+   double risk_money = AccountInfoDouble(ACCOUNT_BALANCE) * (risk_pct / 100.0);
+   double tick_val = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tick_sz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double lot = risk_money / ((sl_dist / tick_sz) * tick_val);
    
-   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   
-   double lot_size = risk_money / ((sl_distance_for_math / tick_size) * tick_value);
-   
-   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double step    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   
-   lot_size = MathFloor(lot_size / step) * step;
-   lot_size = MathMax(min_lot, MathMin(max_lot, lot_size));
+   double min = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   lot = MathMax(min, MathMin(max, MathFloor(lot/step)*step));
 
-   trade.Buy(lot_size, _Symbol, entry, real_sl, tp, comment);
+   if (type == ORDER_TYPE_BUY) trade.Buy(lot, _Symbol, entry, real_sl, tp, comment);
+   else trade.Sell(lot, _Symbol, entry, real_sl, tp, comment);
 }
 
 bool IsNewBar()
 {
-   static datetime last_time;
-   datetime curr_time = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
-   if (last_time == curr_time) return false;
-   last_time = curr_time;
+   static datetime last;
+   datetime curr = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
+   if (last == curr) return false;
+   last = curr;
    return true;
 }
