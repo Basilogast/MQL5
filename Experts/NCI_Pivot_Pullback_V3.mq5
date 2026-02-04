@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Pivot_Pro_Swing_V13.4_Split_Risk.mq5                 |
+//|         NCI_Pivot_Pro_Swing_V13.5_TwoStep.mq5                    |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "13.40"
+#property version "13.50"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -41,10 +41,10 @@ input bool UseStructuralTarget = true;
 input double HardFloorBuffer   = 50;   
 input double BackupTP_Pips     = 300;   
 
-//--- 7. SPLIT RISK MANAGEMENT (NEW)
+//--- 7. SPLIT RISK MANAGEMENT
 input group "7. Risk Profiles"
-input double RiskPercent_Standard = 1.0; // For Candle Close (High Confidence)
-input double RiskPercent_Burst    = 0.5; // For Volume Burst (Aggressive)
+input double RiskPercent_Standard = 1.0; 
+input double RiskPercent_Burst    = 0.5; 
 
 //--- 8. VISUAL SETTINGS
 input bool ShowLines = true;      
@@ -148,7 +148,6 @@ void OnTick()
    //--- EXECUTION LOGIC
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
    {
-      // 1. DETERMINE RISK PROFILE
       double activeRiskPercent = (triggerType == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
 
       double execution_sl;  
@@ -177,12 +176,10 @@ void OnTick()
       Print("OPENING S1. Type: ", triggerType);
       
       string clean_comment = "S1_" + DoubleToString(P, 5) + "_" + DoubleToString(R1, 5); 
-      // Pass the activeRiskPercent to the function
       OpenDynamicTrade(clean_comment, currentPrice, calculation_sl, execution_sl, tp, activeRiskPercent);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
    {
-      // 1. DETERMINE RISK PROFILE
       double activeRiskPercent = (triggerType == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
 
       double execution_sl;
@@ -214,7 +211,7 @@ void OnTick()
    }
 }
 
-//--- MANAGEMENT (50% Confirmation Rule)
+//--- NEW: TWO-STEP TRAILING STOP
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -224,6 +221,7 @@ void ManageOpenPositions()
          ulong ticket = PositionGetInteger(POSITION_TICKET);
          double sl = PositionGetDouble(POSITION_SL);
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double openPrice = PositionGetDouble(POSITION_PRICE_OPEN); // Get Entry Price
          string comment = PositionGetString(POSITION_COMMENT);
 
          if (StringFind(comment, "S1_") >= 0)
@@ -241,16 +239,32 @@ void ManageOpenPositions()
                
                if (Original_P > 0 && Original_R1 > 0)
                {
+                  // --- STAGE 2: PROFIT LOCK (At 50%) ---
                   double distance = Original_R1 - Original_P;
-                  double triggerPrice = Original_P + (distance * 0.5); 
+                  double triggerPrice_Stage2 = Original_P + (distance * 0.5); 
                   
-                  if (bid > triggerPrice)
+                  if (bid > triggerPrice_Stage2)
                   {
-                     double new_floor = Original_P - (HardFloorBuffer * _Point); 
-                     if (new_floor > sl + (_Point * 10))
+                     double new_sl_stage2 = Original_P - (HardFloorBuffer * _Point); 
+                     if (new_sl_stage2 > sl + (_Point * 10))
                      {
-                        trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
-                        Print("Step Up! Price passed 50% to R1. Locked SL at Pivot.");
+                        trade.PositionModify(ticket, new_sl_stage2, PositionGetDouble(POSITION_TP));
+                        Print("Stage 2 Complete! Locked SL at Pivot (Profit Lock).");
+                        return; // Done
+                     }
+                  }
+
+                  // --- STAGE 1: SAFETY NET (At Pivot) ---
+                  // If Price is above Pivot, AND we haven't moved SL to Break-Even yet
+                  if (bid > Original_P)
+                  {
+                     double new_sl_stage1 = openPrice + (20 * _Point); // Break Even + 2 pips
+                     
+                     // Only move if our current SL is worse (lower) than Break Even
+                     if (new_sl_stage1 > sl + (_Point * 10))
+                     {
+                        trade.PositionModify(ticket, new_sl_stage1, PositionGetDouble(POSITION_TP));
+                        Print("Stage 1 Complete! Price hit Pivot. Moved SL to Break-Even (Risk Free).");
                      }
                   }
                }
@@ -313,15 +327,12 @@ void DrawSegment(string name, datetime t1, datetime t2, double price, color col,
    }
 }
 
-//--- UPDATED: Accepts specific Risk Percent
 void OpenDynamicTrade(string comment, double entry, double calc_sl, double real_sl, double tp, double active_risk_pct)
 {
    double sl_distance_for_math = entry - calc_sl;
    if (sl_distance_for_math <= 0) return;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   
-   // USE THE PASSED RISK PERCENTAGE (0.5% or 1.0%)
    double risk_money = balance * (active_risk_pct / 100.0);
    
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
