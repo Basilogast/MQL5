@@ -1,27 +1,28 @@
 //+------------------------------------------------------------------+
-//|                     NCI_Pivot_Pro_Swing_V8.0_Volume.mq5          |
+//|               NCI_Pivot_Pro_Swing_V10.0_Fixed_Logic.mq5          |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "8.00"
+#property version "10.00"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 //--- 1. TREND SETTINGS
 input group "1. Trend Settings"
-input int TrendEMA_Period = 200;
+input bool UseTrendFilter   = true;  
+input int TrendEMA_Period   = 200;
 
 //--- 2. PIVOT SETTINGS
 input group "2. Pivot Settings"
 input bool Trade_S1 = true;
 input bool Trade_S2 = true;
 
-//--- 3. VOLUME BURST (THE NEW EARLY ENTRY)
-input group "3. Early Entry Logic"
-input bool UseVolumeBurst   = true;  // Enter mid-candle if volume is high?
-input double VolumeMultiplier = 1.5; // Current Vol must be 1.5x average to trigger
-input double MaxEntryDistPips = 25;  // Safety: Don't enter if we missed it by > 25 pips
+//--- 3. ENTRY LOGIC
+input group "3. Entry Logic"
+input bool UseVolumeBurst   = true;  
+input double VolumeMultiplier = 1.2; 
+input double MinRiskReward  = 0.6;   
 
 //--- 4. EXIT SETTINGS
 input group "4. Exit Settings"
@@ -31,7 +32,7 @@ input double HardFloorBuffer   = 50;
 //--- 5. RISK MANAGEMENT
 input group "5. Structural Risk"
 input double RiskPercent    = 1.0;   
-input double SafetyBuffer   = 100;   
+input double SafetyBuffer   = 50;    
 input double BackupTP_Pips  = 300;   
 
 //--- 6. VISUAL SETTINGS
@@ -60,9 +61,8 @@ void OnTick()
    CalculateDailyPivots();
    ManageOpenPositions(); 
 
-   if (!IsNewBar() && !UseVolumeBurst) return; // If not using burst, only check on new bar
+   if (!IsNewBar() && !UseVolumeBurst) return; 
 
-   //--- DATA FETCHING
    double TrendMA[], Close[], Open[], Low[];
    ArraySetAsSeries(TrendMA, true); 
    ArraySetAsSeries(Close, true);  
@@ -75,94 +75,65 @@ void OnTick()
        CopyLow(_Symbol, _Period, 0, 3, Low) < 3)
       return;
 
-   //--- BASIC LOGIC
-   bool IsUptrend = (Close[1] > TrendMA[1]);
+   //--- TREND
+   bool IsUptrend = true;
+   if (UseTrendFilter) IsUptrend = (Close[1] > TrendMA[1]);
+
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   
-   //--- CHECK SIGNALS
    bool Signal_S1 = false;
    bool Signal_S2 = false;
-   string triggerType = "";
 
-   // 1. STANDARD ENTRY (Completed Candle)
+   //--- STANDARD ENTRY
    if (IsNewBar())
    {
-      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) 
-      {
-         Signal_S1 = true; 
-         triggerType = "Candle Close";
-      }
-      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) 
-      {
-         Signal_S2 = true;
-         triggerType = "Candle Close";
-      }
+      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) Signal_S1 = true; 
+      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) Signal_S2 = true;
    }
 
-   // 2. VOLUME BURST ENTRY (Mid-Candle)
-   // We check this on EVERY TICK, not just New Bar
+   //--- VOLUME BURST ENTRY
    if (UseVolumeBurst && !Signal_S1 && !Signal_S2)
    {
       if (IsHighVolume())
       {
-         // Logic: Price is above line, Current Candle is Green, Volume is Pumping
-         if (currentPrice > S1 && Open[0] < S1 && currentPrice > Open[0])
-         {
-            Signal_S1 = true;
-            triggerType = "Volume Burst!";
-         }
-         if (currentPrice > S2 && Open[0] < S2 && currentPrice > Open[0])
-         {
-            Signal_S2 = true;
-            triggerType = "Volume Burst!";
-         }
+         if (currentPrice > S1 && Open[0] < S1 && currentPrice > Open[0]) Signal_S1 = true;
+         if (currentPrice > S2 && Open[0] < S2 && currentPrice > Open[0]) Signal_S2 = true;
       }
    }
 
-   //--- EXECUTION (With Max Distance Filter)
-   double dist_S1 = (currentPrice - S1) / _Point;
-   double dist_S2 = (currentPrice - S2) / _Point;
-
+   //--- EXECUTION (Saving Trigger Price in Comment)
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
    {
-      if (dist_S1 > (MaxEntryDistPips * 10)) return; // Too late
-      
       double sl = S2 - (SafetyBuffer * _Point); 
       double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
-      OpenDynamicTrade("S1 Buy [" + triggerType + "]", currentPrice, sl, tp);
+      
+      double risk   = currentPrice - sl;
+      double reward = tp - currentPrice;
+      double rr_ratio = (risk > 0) ? reward/risk : 0;
+
+      if (risk > 0 && rr_ratio < MinRiskReward) return; 
+      
+      // SAVE THE PIVOT PRICE (P) INTO THE COMMENT
+      // Format: "S1_TriggerPrice"
+      string clean_comment = "S1_" + DoubleToString(P, 5); 
+      OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
    {
-      if (dist_S2 > (MaxEntryDistPips * 10)) return; // Too late
-
       double sl = S3 - (SafetyBuffer * _Point); 
       double tp = UseStructuralTarget ? P : (currentPrice + BackupTP_Pips * _Point);
-      OpenDynamicTrade("S2 Buy [" + triggerType + "]", currentPrice, sl, tp);
+      
+      double risk   = currentPrice - sl;
+      double reward = tp - currentPrice;
+      double rr_ratio = (risk > 0) ? reward/risk : 0;
+
+      if (risk > 0 && rr_ratio < MinRiskReward) return; 
+      
+      string clean_comment = "S2_" + DoubleToString(P, 5); // Saving P as target/ref
+      OpenDynamicTrade(clean_comment, currentPrice, sl, tp);
    }
 }
 
-//--- NEW: CHECK FOR HIGH VOLUME
-bool IsHighVolume()
-{
-   long volumes[];
-   ArraySetAsSeries(volumes, true);
-   
-   // Get last 21 volume bars (0 is current)
-   if (CopyTickVolume(_Symbol, _Period, 0, 21, volumes) < 21) return false;
-   
-   double total = 0;
-   for(int i=1; i<=20; i++) total += (double)volumes[i];
-   double average = total / 20.0;
-   
-   // Is CURRENT volume (0) already significantly higher than average?
-   if (volumes[0] > (average * VolumeMultiplier)) return true;
-   
-   return false;
-}
-
-// ... [Rest of Helper Functions: ManageOpenPositions, CalculateDailyPivots, OpenDynamicTrade, etc.] ...
-// (Copy them from V7.1)
-
+//--- FIXED MANAGEMENT LOGIC
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -174,19 +145,44 @@ void ManageOpenPositions()
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          string comment = PositionGetString(POSITION_COMMENT);
 
-         if (StringFind(comment, "S1 Buy") >= 0)
+         // We check: Is this an S1 trade?
+         if (StringFind(comment, "S1_") >= 0)
          {
-            if (bid > P)
+            // EXTRACT THE ORIGINAL PIVOT FROM COMMENT
+            // Comment looks like "S1_1.25430"
+            string p_string = StringSubstr(comment, 3, 7); // Grab the number part
+            double Original_P = StringToDouble(p_string);
+            
+            // Safety Check: If conversion failed, ignore.
+            if (Original_P > 0)
             {
-               double new_floor = P - (HardFloorBuffer * _Point); 
-               if (new_floor > sl + (_Point * 10))
+               // NOW we compare price to the ORIGINAL P, not the Global P
+               if (bid > Original_P)
                {
-                  trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
+                  double new_floor = Original_P - (HardFloorBuffer * _Point); 
+                  if (new_floor > sl + (_Point * 10))
+                  {
+                     trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
+                     Print("Step Up! Price crossed Original Pivot (", Original_P, ")");
+                  }
                }
             }
          }
       }
    }
+}
+
+//--- HELPERS (Standard) ---
+bool IsHighVolume()
+{
+   long volumes[];
+   ArraySetAsSeries(volumes, true);
+   if (CopyTickVolume(_Symbol, _Period, 0, 21, volumes) < 21) return false;
+   double total = 0;
+   for(int i=1; i<=20; i++) total += (double)volumes[i]; 
+   double average = total / 20.0;
+   if ((double)volumes[0] > (average * VolumeMultiplier)) return true;
+   return false;
 }
 
 void CalculateDailyPivots()
