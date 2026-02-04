@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|           NCI_Pivot_Pro_Swing_V15.1_Visuals.mq5                  |
+//|       NCI_Pivot_Pro_Swing_V15.4_MagnetDebug.mq5                  |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "15.10"
+#property version "15.40"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -15,13 +15,14 @@ input int TrendEMA_Period   = 200;
 
 //--- 2. PIVOT SETTINGS
 input group "2. Pivot Settings"
-input bool Trade_S1 = true; // Buy Support 1
-input bool Trade_S2 = true; // Buy Support 2
-input bool Trade_R1 = true; // Sell Resistance 1
-input bool Trade_R2 = true; // Sell Resistance 2
+input bool Trade_S1 = true; 
+input bool Trade_S2 = true; 
+input bool Trade_R1 = true; 
+input bool Trade_R2 = true; 
 
 //--- 3. ENTRY LOGIC
 input group "3. Entry Logic"
+input double MagnetPips     = 0.0;   // NEW: Tolerance for "Touching" the line
 input bool UseVolumeBurst   = true;  
 input double VolumeMultiplier = 1.2; 
 input double MinRiskReward  = 0.6;   
@@ -50,7 +51,7 @@ input double RiskPercent_Burst    = 0.5;
 
 //--- 8. VISUAL SETTINGS
 input bool ShowLines = true;      
-input color Color_R2 = clrDarkGreen; // NEW: Visual for R2
+input color Color_R2 = clrDarkGreen;
 input color Color_R1 = clrGreen;  
 input color Color_P  = clrBlue;   
 input color Color_S1 = clrRed;    
@@ -108,21 +109,68 @@ void OnTick()
 
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK); 
    double currentBid   = SymbolInfoDouble(_Symbol, SYMBOL_BID); 
+   double magnet = MagnetPips * 10 * _Point; // Convert pips to points
 
    bool Signal_S1 = false, Signal_S2 = false;
    bool Signal_R1 = false, Signal_R2 = false;
    string triggerType = ""; 
 
-   //--- 1. STANDARD ENTRY (Candle Close)
+   //--- 1. STANDARD ENTRY (MAGNET + DEBUG)
    if (IsNewBar())
    {
-      // BUY LOGIC
-      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) { Signal_S1 = true; triggerType = "Candle Close"; }
-      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) { Signal_S2 = true; triggerType = "Candle Close"; }
+      // --- BUY LOGIC (Low must be <= Level + Magnet) ---
+      
+      // S1 CHECK
+      bool S1_Touch = (Low[1] <= S1 + magnet);
+      bool S1_Green = (Close[1] > Open[1]);
+      bool S1_Above = (Close[1] > S1);
+      
+      // Method A: One-Bar
+      if (S1_Touch && S1_Green && S1_Above) { Signal_S1 = true; triggerType = "Candle Close"; }
+      
+      // Method B: Two-Bar (Relaxed)
+      bool S1_PrevTouch = (Low[2] <= S1 + magnet);
+      if (!Signal_S1 && S1_PrevTouch && S1_Green && S1_Above) { Signal_S1 = true; triggerType = "Candle Close (2-Bar)"; }
+      
+      // DEBUG PRINT FOR S1
+      if (S1_Touch && !Signal_S1 && !IsUptrend) Print("DEBUG SKIP S1: Touched Line, but Trend is DOWN.");
+      else if (S1_Touch && !Signal_S1 && !S1_Green) Print("DEBUG SKIP S1: Touched Line, but Candle RED.");
+      else if (S1_Touch && !Signal_S1 && !S1_Above) Print("DEBUG SKIP S1: Touched Line, but Failed to close ABOVE.");
 
-      // SELL LOGIC
-      if (High[1] >= R1 && Close[1] < R1 && Close[1] < Open[1]) { Signal_R1 = true; triggerType = "Candle Close"; }
-      if (High[1] >= R2 && Close[1] < R2 && Close[1] < Open[1]) { Signal_R2 = true; triggerType = "Candle Close"; }
+      // S2 CHECK
+      bool S2_Touch = (Low[1] <= S2 + magnet);
+      bool S2_Green = (Close[1] > Open[1]);
+      bool S2_Above = (Close[1] > S2);
+      
+      if (S2_Touch && S2_Green && S2_Above) { Signal_S2 = true; triggerType = "Candle Close"; }
+      bool S2_PrevTouch = (Low[2] <= S2 + magnet);
+      if (!Signal_S2 && S2_PrevTouch && S2_Green && S2_Above) { Signal_S2 = true; triggerType = "Candle Close (2-Bar)"; }
+
+      // --- SELL LOGIC (High must be >= Level - Magnet) ---
+      
+      // R1 CHECK
+      bool R1_Touch = (High[1] >= R1 - magnet);
+      bool R1_Red   = (Close[1] < Open[1]);
+      bool R1_Below = (Close[1] < R1);
+
+      if (R1_Touch && R1_Red && R1_Below) { Signal_R1 = true; triggerType = "Candle Close"; }
+      
+      bool R1_PrevTouch = (High[2] >= R1 - magnet);
+      if (!Signal_R1 && R1_PrevTouch && R1_Red && R1_Below) { Signal_R1 = true; triggerType = "Candle Close (2-Bar)"; }
+
+      // DEBUG PRINT FOR R1
+      if (R1_Touch && !Signal_R1 && !IsDowntrend) Print("DEBUG SKIP R1: Touched Line, but Trend is UP.");
+      else if (R1_Touch && !Signal_R1 && !R1_Red) Print("DEBUG SKIP R1: Touched Line, but Candle GREEN.");
+      else if (R1_Touch && !Signal_R1 && !R1_Below) Print("DEBUG SKIP R1: Touched Line, but Failed to close BELOW.");
+
+      // R2 CHECK
+      bool R2_Touch = (High[1] >= R2 - magnet);
+      bool R2_Red   = (Close[1] < Open[1]);
+      bool R2_Below = (Close[1] < R2);
+      
+      if (R2_Touch && R2_Red && R2_Below) { Signal_R2 = true; triggerType = "Candle Close"; }
+      bool R2_PrevTouch = (High[2] >= R2 - magnet);
+      if (!Signal_R2 && R2_PrevTouch && R2_Red && R2_Below) { Signal_R2 = true; triggerType = "Candle Close (2-Bar)"; }
    }
 
    //--- 2. VOLUME BURST ENTRY
@@ -132,23 +180,33 @@ void OnTick()
       {
          // BUY BURST
          double solidGreen = Open[0] + (GreenBufferPips * 10 * _Point);
-         if (currentPrice > S1 && Open[0] < S1 && currentPrice > solidGreen) { Signal_S1 = true; triggerType = "Volume Burst"; }
-         if (currentPrice > S2 && Open[0] < S2 && currentPrice > solidGreen) { Signal_S2 = true; triggerType = "Volume Burst"; }
+         // Magnet not strictly needed for burst as it's a "crossing" logic, but applied for consistency if needed
+         if (currentPrice > S1 && Open[0] < S1 + magnet && currentPrice > solidGreen) { Signal_S1 = true; triggerType = "Volume Burst"; }
+         if (currentPrice > S2 && Open[0] < S2 + magnet && currentPrice > solidGreen) { Signal_S2 = true; triggerType = "Volume Burst"; }
 
          // SELL BURST
          double solidRed = Open[0] - (GreenBufferPips * 10 * _Point);
-         if (currentBid < R1 && Open[0] > R1 && currentBid < solidRed) { Signal_R1 = true; triggerType = "Volume Burst"; }
-         if (currentBid < R2 && Open[0] > R2 && currentBid < solidRed) { Signal_R2 = true; triggerType = "Volume Burst"; }
+         if (currentBid < R1 && Open[0] > R1 - magnet && currentBid < solidRed) { Signal_R1 = true; triggerType = "Volume Burst"; }
+         if (currentBid < R2 && Open[0] > R2 - magnet && currentBid < solidRed) { Signal_R2 = true; triggerType = "Volume Burst"; }
       }
    }
    
-   //--- 3. PROTECTION
+   //--- 3. PROTECTION (DEBUG ADDED)
    if (AvoidViolentMoves)
    {
       double candleSize = High[1] - Low[1];
       double averageSize = ATR[1];
-      if ((Signal_S1 || Signal_S2) && Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return;
-      if ((Signal_R1 || Signal_R2) && Close[1] > Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) return;
+      
+      if ((Signal_S1 || Signal_S2) && Close[1] < Open[1] && candleSize > (averageSize * MaxCandleSizeATR)) 
+      {
+         Print("DEBUG SKIP: Valid Buy Signal, but SKIPPED due to Violent Drop (Falling Knife).");
+         return;
+      }
+      if ((Signal_R1 || Signal_R2) && Close[1] > Open[1] && candleSize > (averageSize * MaxCandleSizeATR))
+      {
+         Print("DEBUG SKIP: Valid Sell Signal, but SKIPPED due to Violent Rally (Rocket).");
+         return;
+      }
    }
 
    // EXECUTION
@@ -157,18 +215,29 @@ void OnTick()
       if (Trade_S1 && Signal_S1) ProcessEntry(ORDER_TYPE_BUY, S1, S2, R1, P, triggerType, "S1");
       else if (Trade_S2 && Signal_S2) ProcessEntry(ORDER_TYPE_BUY, S2, S3, P, P, triggerType, "S2");
    }
+   // DEBUG: Signal present but Trend blocked execution?
+   else if (PositionsTotal() < 1 && !IsUptrend && (Signal_S1 || Signal_S2))
+   {
+      Print("DEBUG SKIP: Valid Buy Signal (S1/S2), but blocked by GLOBAL TREND FILTER (Close < EMA 200).");
+   }
 
    if (PositionsTotal() < 1 && IsDowntrend)
    {
       if (Trade_R1 && Signal_R1) ProcessEntry(ORDER_TYPE_SELL, R1, R2, S1, P, triggerType, "R1");
       else if (Trade_R2 && Signal_R2) ProcessEntry(ORDER_TYPE_SELL, R2, R3, P, P, triggerType, "R2");
    }
+   else if (PositionsTotal() < 1 && !IsDowntrend && (Signal_R1 || Signal_R2))
+   {
+      Print("DEBUG SKIP: Valid Sell Signal (R1/R2), but blocked by GLOBAL TREND FILTER (Close > EMA 200).");
+   }
 }
+
+// ... [Rest of functions: ProcessEntry, ManageOpenPositions, etc. remain unchanged] ...
 
 void ProcessEntry(ENUM_ORDER_TYPE type, double level, double next_level, double target, double pivot, string trigger, string label)
 {
    double currentPrice = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double activeRisk = (trigger == "Volume Burst") ? RiskPercent_Burst : RiskPercent_Standard;
+   double activeRisk = (StringFind(trigger, "Volume Burst") >= 0) ? RiskPercent_Burst : RiskPercent_Standard;
    
    double dist_pips = MathAbs(level - next_level) / _Point / 10.0;
    double execution_sl, calculation_sl;
@@ -315,7 +384,6 @@ void CalculateDailyPivots()
       if (ShowLines)
       {
          datetime end = currentDay + 86400; 
-         // ADDED R2 HERE
          DrawSegment("R2_"+TimeToString(currentDay), currentDay, end, R2, Color_R2, STYLE_DASH);
          DrawSegment("R1_"+TimeToString(currentDay), currentDay, end, R1, Color_R1, STYLE_SOLID);
          DrawSegment("P_"+TimeToString(currentDay), currentDay, end, P, Color_P, STYLE_SOLID);
