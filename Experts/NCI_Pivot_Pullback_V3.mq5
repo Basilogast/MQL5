@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|                            NCI_Pivot_Pullback_V3.2_History.mq5   |
+//|                               NCI_Pivot_Pullback_V5.0_Swing.mq5  |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "3.20"
+#property version "5.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -17,18 +17,23 @@ input group "2. Pivot Settings"
 input bool Trade_S1 = true;
 input bool Trade_S2 = true;
 
-//--- 3. VISUAL SETTINGS
-input group "3. Visual Debugging"
+//--- 3. EXIT LOGIC (SWING MODE)
+input group "3. Exit Settings"
+input bool UseDynamicTargets = true; // True = Target the next line (S1->P). False = Use Fixed Pips.
+// NOTE: We removed "CloseAtEndOfDay". We now hold until target.
+
+//--- 4. VISUAL SETTINGS
+input group "4. Visual Debugging"
 input bool ShowLines = true;      
 input color Color_P  = clrBlue;   
 input color Color_S1 = clrRed;    
 input color Color_S2 = clrDarkRed;
 
-//--- 4. RISK MANAGEMENT
-input group "4. Risk Management"
+//--- 5. RISK MANAGEMENT
+input group "5. Risk Management"
 input double RiskPercent    = 1.0;
 input double StopLossPips   = 100;
-input double TakeProfitPips = 300;
+input double TakeProfitPips = 300; // Backup if DynamicTargets is false
 input int BreakEvenPips     = 100;
 input int TrailingPips      = 150;
 
@@ -46,12 +51,11 @@ int OnInit()
    return (TrendHandle == INVALID_HANDLE) ? INIT_FAILED : INIT_SUCCEEDED;
 }
 
-// NOTE: We REMOVED OnDeinit() so lines stay on the chart!
-
 void OnTick()
 {
    ManageOpenPositions();
    CalculateDailyPivots();
+   // REMOVED: CheckTimeExit(); -> We now allow trades to roll over to the next day.
 
    if (!IsNewBar()) return;
 
@@ -69,7 +73,6 @@ void OnTick()
       return;
 
    //--- STRATEGY LOGIC -------------------------------------------
-
    bool IsUptrend = (Close[1] > TrendMA[1]);
    bool TouchedS1 = (Low[1] <= S1 && Close[1] > S1); 
    bool TouchedS2 = (Low[1] <= S2 && Close[1] > S2); 
@@ -78,39 +81,39 @@ void OnTick()
    //--- ENTRY EXECUTION
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && TouchedS1 && GreenCandle)
    {
-      OpenTrade("Pivot S1 Bounce");
+      // If using dynamic targets, we aim for P (The Pivot).
+      // We lock this price in NOW. Even if P changes tomorrow, the TP stays here.
+      double targetPrice = UseDynamicTargets ? P : (SymbolInfoDouble(_Symbol, SYMBOL_ASK) + TakeProfitPips * _Point);
+      
+      OpenTrade("Pivot S1 -> Target P", targetPrice);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && TouchedS2 && GreenCandle)
    {
-      OpenTrade("Pivot S2 Deep Bounce");
+      // If buying at S2, we aim for S1 (The previous floor).
+      double targetPrice = UseDynamicTargets ? S1 : (SymbolInfoDouble(_Symbol, SYMBOL_ASK) + TakeProfitPips * _Point);
+      
+      OpenTrade("Pivot S2 -> Target S1", targetPrice);
    }
 }
 
-//--- CALCULATE & DRAW PIVOTS (HISTORY MODE)
+//--- CALCULATE & DRAW
 void CalculateDailyPivots()
 {
    datetime currentDay = iTime(_Symbol, PERIOD_D1, 0);
    if (LastDay != currentDay)
    {
       LastDay = currentDay;
-      
-      // Get Yesterday's Data
       double high = iHigh(_Symbol, PERIOD_D1, 1);
       double low  = iLow(_Symbol, PERIOD_D1, 1);
       double close= iClose(_Symbol, PERIOD_D1, 1);
       
-      // Calculate
       P = (high + low + close) / 3.0;
       S1 = (2 * P) - high;
       S2 = P - (high - low);
       
-      // DRAW PERMANENT HISTORY LINES
       if (ShowLines)
       {
-         // Calculate End of Day time (start + 24 hours)
          datetime endOfDay = currentDay + 86400; 
-         
-         // Draw unique segments for this specific day
          DrawSegment("P_" + TimeToString(currentDay), currentDay, endOfDay, P, Color_P, STYLE_SOLID);
          DrawSegment("S1_" + TimeToString(currentDay), currentDay, endOfDay, S1, Color_S1, STYLE_SOLID);
          DrawSegment("S2_" + TimeToString(currentDay), currentDay, endOfDay, S2, Color_S2, STYLE_DASH);
@@ -118,7 +121,6 @@ void CalculateDailyPivots()
    }
 }
 
-//--- HELPER: DRAW SEGMENT (Start to End Time)
 void DrawSegment(string name, datetime t1, datetime t2, double price, color col, ENUM_LINE_STYLE style)
 {
    if (ObjectFind(0, name) < 0)
@@ -127,16 +129,18 @@ void DrawSegment(string name, datetime t1, datetime t2, double price, color col,
       ObjectSetInteger(0, name, OBJPROP_COLOR, col);
       ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
       ObjectSetInteger(0, name, OBJPROP_STYLE, style);
-      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false); // Do not extend to infinity
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false); 
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    }
 }
 
-void OpenTrade(string comment)
+void OpenTrade(string comment, double tp_price)
 {
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double lot = CalculateLotSize(StopLossPips);
-   trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), ask + (TakeProfitPips * _Point), comment);
+   // We send the 'tp_price' directly to the broker. 
+   // The broker stores this. Even if the bot is turned off or the day changes, the TP remains.
+   trade.Buy(lot, _Symbol, ask, ask - (StopLossPips * _Point), tp_price, comment);
 }
 
 double CalculateLotSize(double sl_pips)
@@ -161,9 +165,11 @@ void ManageOpenPositions()
          double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
+         // Break Even Logic
          if (sl < open_price && bid >= open_price + (BreakEvenPips * _Point))
             trade.PositionModify(ticket, open_price + (10 * _Point), PositionGetDouble(POSITION_TP));
 
+         // Trailing Stop Logic
          double new_sl = bid - (TrailingPips * _Point);
          if (new_sl > sl + (_Point * 10))
             trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
