@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|                            NCI_Pivot_Pullback_V6.0_Structural.mq5|
+//|                          NCI_Pivot_Pro_Swing_V7.0.mq5            |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "6.00"
+#property version "7.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -17,19 +17,20 @@ input group "2. Pivot Settings"
 input bool Trade_S1 = true;
 input bool Trade_S2 = true;
 
-//--- 3. EXIT SETTINGS
+//--- 3. EXIT SETTINGS (PRO SWING)
 input group "3. Exit Settings"
-input bool UseDynamicTargets = true; // Aim for P or S1
+input bool UseStructuralTarget = true; // True = Aim for R1 (if bought at S1) or P (if bought at S2)
+input double HardFloorBuffer   = 50;   // Points below Pivot to place the "Step Up" SL (5 pips)
 
-//--- 4. RISK MANAGEMENT (STRUCTURAL)
+//--- 4. RISK MANAGEMENT
 input group "4. Structural Risk"
-input double RiskPercent    = 1.0;   // Risk 1% of equity per trade
-input double SafetyBuffer   = 100;   // Points (not pips) to place SL below the level (100 pts = 10 pips)
-input double TakeProfitPips = 300;   // Backup TP only
+input double RiskPercent    = 1.0;   
+input double SafetyBuffer   = 100;   // SL Buffer below S2/S3
+input double BackupTP_Pips  = 300;   
 
 //--- 5. VISUAL SETTINGS
-input group "5. Visual Debugging"
 input bool ShowLines = true;      
+input color Color_R1 = clrGreen;  // Added R1 Color
 input color Color_P  = clrBlue;   
 input color Color_S1 = clrRed;    
 input color Color_S2 = clrDarkRed;
@@ -38,7 +39,7 @@ int TrendHandle;
 CTrade trade;
 
 // Global Variables
-double P, S1, S2, S3; // Added S3 for safety below S2
+double R1, P, S1, S2, S3; 
 datetime LastDay = 0;
 
 int OnInit()
@@ -50,8 +51,8 @@ int OnInit()
 
 void OnTick()
 {
-   ManageOpenPositions();
    CalculateDailyPivots();
+   ManageOpenPositions(); // New Smart Logic Inside
 
    if (!IsNewBar()) return;
 
@@ -77,63 +78,60 @@ void OnTick()
    //--- ENTRY EXECUTION
    if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && TouchedS1 && GreenCandle)
    {
-      double entryPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double sl = S2 - (SafetyBuffer * _Point); // Risk: Below S2
       
-      // STOP LOSS: Place below S2 (The Structural Basement)
-      double structuralSL = S2 - (SafetyBuffer * _Point);
+      // TARGET: Aim for R1 (The Extension)
+      double tp = UseStructuralTarget ? R1 : (entry + BackupTP_Pips * _Point);
       
-      // TAKE PROFIT: Target Pivot (P)
-      double targetTP = UseDynamicTargets ? P : (entryPrice + TakeProfitPips * _Point);
-      
-      OpenDynamicTrade("S1 Buy -> SL below S2", entryPrice, structuralSL, targetTP);
+      OpenDynamicTrade("S1 Buy -> Target R1", entry, sl, tp);
    }
    else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && TouchedS2 && GreenCandle)
    {
-      double entryPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double sl = S3 - (SafetyBuffer * _Point); // Risk: Below S3
       
-      // STOP LOSS: Place below S3 (Deepest Structural Support)
-      double structuralSL = S3 - (SafetyBuffer * _Point);
+      // TARGET: Aim for P (The Recovery)
+      double tp = UseStructuralTarget ? P : (entry + BackupTP_Pips * _Point);
       
-      // TAKE PROFIT: Target S1 (The previous floor)
-      double targetTP = UseDynamicTargets ? S1 : (entryPrice + TakeProfitPips * _Point);
-      
-      OpenDynamicTrade("S2 Buy -> SL below S3", entryPrice, structuralSL, targetTP);
+      OpenDynamicTrade("S2 Buy -> Target P", entry, sl, tp);
    }
 }
 
-//--- NEW: DYNAMIC RISK CALCULATOR
-void OpenDynamicTrade(string comment, double entry, double sl, double tp)
+//--- SMART MANAGEMENT (The "Step Up" Logic)
+void ManageOpenPositions()
 {
-   // 1. Calculate Distance to Stop Loss
-   double sl_distance = entry - sl;
-   
-   // Safety check: Don't trade if SL is ABOVE entry (Error) or too close (Spread risk)
-   if (sl_distance <= 0) return;
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (PositionGetSymbol(i) == _Symbol)
+      {
+         ulong ticket = PositionGetInteger(POSITION_TICKET);
+         double sl = PositionGetDouble(POSITION_SL);
+         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         string comment = PositionGetString(POSITION_COMMENT);
 
-   // 2. Get Account Risk Money
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double risk_money = balance * (RiskPercent / 100.0);
-   
-   // 3. Calculate Pip Value and Lot Size
-   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   
-   // Formula: Lots = Money / (Points_Distance * Value_Per_Point)
-   double lot_size = risk_money / ((sl_distance / tick_size) * tick_value);
-   
-   // 4. Normalize Lots to Broker Limits
-   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double step    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   
-   lot_size = MathFloor(lot_size / step) * step; // Round down to step
-   lot_size = MathMax(min_lot, MathMin(max_lot, lot_size));
-
-   // 5. Execute
-   trade.Buy(lot_size, _Symbol, entry, sl, tp, comment);
+         // LOGIC: If we bought at S1, we are watching P (The Pivot)
+         if (StringFind(comment, "S1 Buy") >= 0)
+         {
+            // Condition: Price has conquered P
+            if (bid > P)
+            {
+               double new_floor = P - (HardFloorBuffer * _Point); // 5 pips below P
+               
+               // Only move UP, and only if we haven't already moved it there
+               if (new_floor > sl + (_Point * 10))
+               {
+                  trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
+                  Print("Step Up! Price crossed Pivot. SL moved to P - Buffer.");
+               }
+            }
+         }
+         // Note: We do NOT use a pip-trailing stop here. We trust the wall.
+      }
+   }
 }
 
-//--- CALCULATE PIVOTS (Added S3)
+//--- CALCULATE PIVOTS (Added R1)
 void CalculateDailyPivots()
 {
    datetime currentDay = iTime(_Symbol, PERIOD_D1, 0);
@@ -147,11 +145,13 @@ void CalculateDailyPivots()
       P = (high + low + close) / 3.0;
       S1 = (2 * P) - high;
       S2 = P - (high - low);
-      S3 = low - 2 * (high - P); // Standard S3 Formula
+      S3 = low - 2 * (high - P); 
+      R1 = (2 * P) - low; // Target for S1 Buys
       
       if (ShowLines)
       {
          datetime endOfDay = currentDay + 86400; 
+         DrawSegment("R1_" + TimeToString(currentDay), currentDay, endOfDay, R1, Color_R1, STYLE_SOLID);
          DrawSegment("P_" + TimeToString(currentDay), currentDay, endOfDay, P, Color_P, STYLE_SOLID);
          DrawSegment("S1_" + TimeToString(currentDay), currentDay, endOfDay, S1, Color_S1, STYLE_SOLID);
          DrawSegment("S2_" + TimeToString(currentDay), currentDay, endOfDay, S2, Color_S2, STYLE_DASH);
@@ -172,22 +172,26 @@ void DrawSegment(string name, datetime t1, datetime t2, double price, color col,
    }
 }
 
-void ManageOpenPositions()
+void OpenDynamicTrade(string comment, double entry, double sl, double tp)
 {
-   // Basic Trailing Logic Only
-   for (int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if (PositionGetSymbol(i) == _Symbol)
-      {
-         ulong ticket = PositionGetInteger(POSITION_TICKET);
-         double sl = PositionGetDouble(POSITION_SL);
-         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         // Simple trailing logic to protect gains
-         double new_sl = bid - (150 * _Point); // 15 pips trail
-         if (new_sl > sl + (_Point * 10))
-            trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
-      }
-   }
+   double sl_distance = entry - sl;
+   if (sl_distance <= 0) return;
+
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double risk_money = balance * (RiskPercent / 100.0);
+   
+   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double lot_size = risk_money / ((sl_distance / tick_size) * tick_value);
+   
+   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double step    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   lot_size = MathFloor(lot_size / step) * step;
+   lot_size = MathMax(min_lot, MathMin(max_lot, lot_size));
+
+   trade.Buy(lot_size, _Symbol, entry, sl, tp, comment);
 }
 
 bool IsNewBar()
