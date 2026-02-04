@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|                          NCI_Pivot_Pro_Swing_V7.0.mq5            |
+//|                     NCI_Pivot_Pro_Swing_V8.0_Volume.mq5          |
 //|                                  Copyright 2024, Trading Script  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "7.00"
+#property version "8.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -17,20 +17,26 @@ input group "2. Pivot Settings"
 input bool Trade_S1 = true;
 input bool Trade_S2 = true;
 
-//--- 3. EXIT SETTINGS (PRO SWING)
-input group "3. Exit Settings"
-input bool UseStructuralTarget = true; // True = Aim for R1 (if bought at S1) or P (if bought at S2)
-input double HardFloorBuffer   = 50;   // Points below Pivot to place the "Step Up" SL (5 pips)
+//--- 3. VOLUME BURST (THE NEW EARLY ENTRY)
+input group "3. Early Entry Logic"
+input bool UseVolumeBurst   = true;  // Enter mid-candle if volume is high?
+input double VolumeMultiplier = 1.5; // Current Vol must be 1.5x average to trigger
+input double MaxEntryDistPips = 25;  // Safety: Don't enter if we missed it by > 25 pips
 
-//--- 4. RISK MANAGEMENT
-input group "4. Structural Risk"
+//--- 4. EXIT SETTINGS
+input group "4. Exit Settings"
+input bool UseStructuralTarget = true; 
+input double HardFloorBuffer   = 50;   
+
+//--- 5. RISK MANAGEMENT
+input group "5. Structural Risk"
 input double RiskPercent    = 1.0;   
-input double SafetyBuffer   = 100;   // SL Buffer below S2/S3
+input double SafetyBuffer   = 100;   
 input double BackupTP_Pips  = 300;   
 
-//--- 5. VISUAL SETTINGS
+//--- 6. VISUAL SETTINGS
 input bool ShowLines = true;      
-input color Color_R1 = clrGreen;  // Added R1 Color
+input color Color_R1 = clrGreen;  
 input color Color_P  = clrBlue;   
 input color Color_S1 = clrRed;    
 input color Color_S2 = clrDarkRed;
@@ -52,11 +58,11 @@ int OnInit()
 void OnTick()
 {
    CalculateDailyPivots();
-   ManageOpenPositions(); // New Smart Logic Inside
+   ManageOpenPositions(); 
 
-   if (!IsNewBar()) return;
+   if (!IsNewBar() && !UseVolumeBurst) return; // If not using burst, only check on new bar
 
-   //--- Define Arrays
+   //--- DATA FETCHING
    double TrendMA[], Close[], Open[], Low[];
    ArraySetAsSeries(TrendMA, true); 
    ArraySetAsSeries(Close, true);  
@@ -69,36 +75,94 @@ void OnTick()
        CopyLow(_Symbol, _Period, 0, 3, Low) < 3)
       return;
 
-   //--- STRATEGY LOGIC -------------------------------------------
+   //--- BASIC LOGIC
    bool IsUptrend = (Close[1] > TrendMA[1]);
-   bool TouchedS1 = (Low[1] <= S1 && Close[1] > S1); 
-   bool TouchedS2 = (Low[1] <= S2 && Close[1] > S2); 
-   bool GreenCandle = (Close[1] > Open[1]);
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   
+   //--- CHECK SIGNALS
+   bool Signal_S1 = false;
+   bool Signal_S2 = false;
+   string triggerType = "";
 
-   //--- ENTRY EXECUTION
-   if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && TouchedS1 && GreenCandle)
+   // 1. STANDARD ENTRY (Completed Candle)
+   if (IsNewBar())
    {
-      double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl = S2 - (SafetyBuffer * _Point); // Risk: Below S2
-      
-      // TARGET: Aim for R1 (The Extension)
-      double tp = UseStructuralTarget ? R1 : (entry + BackupTP_Pips * _Point);
-      
-      OpenDynamicTrade("S1 Buy -> Target R1", entry, sl, tp);
+      if (Low[1] <= S1 && Close[1] > S1 && Close[1] > Open[1]) 
+      {
+         Signal_S1 = true; 
+         triggerType = "Candle Close";
+      }
+      if (Low[1] <= S2 && Close[1] > S2 && Close[1] > Open[1]) 
+      {
+         Signal_S2 = true;
+         triggerType = "Candle Close";
+      }
    }
-   else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && TouchedS2 && GreenCandle)
+
+   // 2. VOLUME BURST ENTRY (Mid-Candle)
+   // We check this on EVERY TICK, not just New Bar
+   if (UseVolumeBurst && !Signal_S1 && !Signal_S2)
    {
-      double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl = S3 - (SafetyBuffer * _Point); // Risk: Below S3
+      if (IsHighVolume())
+      {
+         // Logic: Price is above line, Current Candle is Green, Volume is Pumping
+         if (currentPrice > S1 && Open[0] < S1 && currentPrice > Open[0])
+         {
+            Signal_S1 = true;
+            triggerType = "Volume Burst!";
+         }
+         if (currentPrice > S2 && Open[0] < S2 && currentPrice > Open[0])
+         {
+            Signal_S2 = true;
+            triggerType = "Volume Burst!";
+         }
+      }
+   }
+
+   //--- EXECUTION (With Max Distance Filter)
+   double dist_S1 = (currentPrice - S1) / _Point;
+   double dist_S2 = (currentPrice - S2) / _Point;
+
+   if (PositionsTotal() < 1 && IsUptrend && Trade_S1 && Signal_S1)
+   {
+      if (dist_S1 > (MaxEntryDistPips * 10)) return; // Too late
       
-      // TARGET: Aim for P (The Recovery)
-      double tp = UseStructuralTarget ? P : (entry + BackupTP_Pips * _Point);
-      
-      OpenDynamicTrade("S2 Buy -> Target P", entry, sl, tp);
+      double sl = S2 - (SafetyBuffer * _Point); 
+      double tp = UseStructuralTarget ? R1 : (currentPrice + BackupTP_Pips * _Point);
+      OpenDynamicTrade("S1 Buy [" + triggerType + "]", currentPrice, sl, tp);
+   }
+   else if (PositionsTotal() < 1 && IsUptrend && Trade_S2 && Signal_S2)
+   {
+      if (dist_S2 > (MaxEntryDistPips * 10)) return; // Too late
+
+      double sl = S3 - (SafetyBuffer * _Point); 
+      double tp = UseStructuralTarget ? P : (currentPrice + BackupTP_Pips * _Point);
+      OpenDynamicTrade("S2 Buy [" + triggerType + "]", currentPrice, sl, tp);
    }
 }
 
-//--- SMART MANAGEMENT (The "Step Up" Logic)
+//--- NEW: CHECK FOR HIGH VOLUME
+bool IsHighVolume()
+{
+   long volumes[];
+   ArraySetAsSeries(volumes, true);
+   
+   // Get last 21 volume bars (0 is current)
+   if (CopyTickVolume(_Symbol, _Period, 0, 21, volumes) < 21) return false;
+   
+   double total = 0;
+   for(int i=1; i<=20; i++) total += (double)volumes[i];
+   double average = total / 20.0;
+   
+   // Is CURRENT volume (0) already significantly higher than average?
+   if (volumes[0] > (average * VolumeMultiplier)) return true;
+   
+   return false;
+}
+
+// ... [Rest of Helper Functions: ManageOpenPositions, CalculateDailyPivots, OpenDynamicTrade, etc.] ...
+// (Copy them from V7.1)
+
 void ManageOpenPositions()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -110,28 +174,21 @@ void ManageOpenPositions()
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          string comment = PositionGetString(POSITION_COMMENT);
 
-         // LOGIC: If we bought at S1, we are watching P (The Pivot)
          if (StringFind(comment, "S1 Buy") >= 0)
          {
-            // Condition: Price has conquered P
             if (bid > P)
             {
-               double new_floor = P - (HardFloorBuffer * _Point); // 5 pips below P
-               
-               // Only move UP, and only if we haven't already moved it there
+               double new_floor = P - (HardFloorBuffer * _Point); 
                if (new_floor > sl + (_Point * 10))
                {
                   trade.PositionModify(ticket, new_floor, PositionGetDouble(POSITION_TP));
-                  Print("Step Up! Price crossed Pivot. SL moved to P - Buffer.");
                }
             }
          }
-         // Note: We do NOT use a pip-trailing stop here. We trust the wall.
       }
    }
 }
 
-//--- CALCULATE PIVOTS (Added R1)
 void CalculateDailyPivots()
 {
    datetime currentDay = iTime(_Symbol, PERIOD_D1, 0);
@@ -146,7 +203,7 @@ void CalculateDailyPivots()
       S1 = (2 * P) - high;
       S2 = P - (high - low);
       S3 = low - 2 * (high - P); 
-      R1 = (2 * P) - low; // Target for S1 Buys
+      R1 = (2 * P) - low; 
       
       if (ShowLines)
       {
