@@ -1,29 +1,23 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V20.0_ZigZagEngine.mq5                     |
+//|         NCI_Structure_V23.0_VertexFix.mq5                        |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "20.00"
+#property version "23.00"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 //--- 1. VISUAL SETTINGS
 input group "Visual Settings"
-input int HistoryBars       = 1000;  // How far back to draw lines
-input color LineColor       = clrDodgerBlue; 
+input int HistoryBars       = 1000;  
+input color LineColor       = clrWhite; 
 input int LineWidth         = 2;
 
-//--- 2. STRICT RULES (From Slide)
+//--- 2. STRICT RULES (The "Alarm")
 input group "Strict Rules"
-input double MinBodyPercent = 0.50;  // Body > 50% (Slightly relaxed for better visuals)
-input int ReversalCandles   = 2;     // 2 Candles to confirm
-
-//--- 3. TRADING LOGIC
-input group "Trading Logic"
-input double MagnetPips     = 3.0;
-input double RiskPercent    = 1.0;
-input double TargetRR       = 3.0;
+input double MinBodyPercent = 0.50;  
+input int ReversalCandles   = 2;     
 
 //--- GLOBALS
 CTrade trade;
@@ -33,161 +27,156 @@ struct PointStruct {
    int type; // 1=High, -1=Low
    int barIndex;
 };
-PointStruct ZigZagPoints[]; // The final clean list of points
+PointStruct ZigZagPoints[]; 
 
 int OnInit()
 {
    trade.SetExpertMagicNumber(111222); 
-   ObjectsDeleteAll(0, "NCI_ZZ_"); // Clear old lines
-   
-   // Initial Draw
+   ObjectsDeleteAll(0, "NCI_ZZ_"); 
    UpdateZigZagMap();
-   
-   Print(">>> V20 INIT: ZigZag State Machine Loaded.");
+   Print(">>> V23 INIT: Vertex Precision Engine Loaded.");
    return INIT_SUCCEEDED;
 }
 
 void OnTick()
 {
-   // Update the map on every new bar
    if(IsNewBar()) UpdateZigZagMap();
-   
-   // (Trading Logic using ZigZagPoints would go here)
-   // For now, we focus on fixing the Visuals as requested.
 }
 
 // ==========================================================
-//    THE ZIGZAG STATE MACHINE
+//    THE VERTEX ENGINE
 // ==========================================================
 void UpdateZigZagMap()
 {
-   // 1. IDENTIFY ALL CANDIDATES (Raw Points)
-   PointStruct Candidates[];
-   int candCount = 0;
+   // 1. FIND "ALARMS" (Strict Candidates)
+   // These are just the bars where the 2-candle pattern COMPLETED.
+   PointStruct Alarms[];
+   int alarmCount = 0;
    
    int startBar = MathMin(HistoryBars, iBars(_Symbol, _Period)-ReversalCandles-1);
    
-   // Iterate from PAST to PRESENT
    for (int i = startBar; i >= ReversalCandles; i--) 
    {
-      // CHECK FOR SWING HIGH CANDIDATE
-      // Pattern: Green Candle (i) -> 2 Strong Red Candles (i-1, i-2)
+      // CHECK FOR HIGH SIGNAL (Green -> 2 Red)
       if (IsGreen(i)) 
       {
          bool isHigh = true;
          for(int k=1; k<=ReversalCandles; k++) {
             if(!IsRed(i-k) || !IsStrongBody(i-k)) { isHigh = false; break; }
          }
-         
          if(isHigh) {
-            ArrayResize(Candidates, candCount + 1);
-            Candidates[candCount].price = iHigh(_Symbol, _Period, i);
-            Candidates[candCount].time  = iTime(_Symbol, _Period, i);
-            Candidates[candCount].type  = 1; // High Candidate
-            Candidates[candCount].barIndex = i;
-            candCount++;
+            ArrayResize(Alarms, alarmCount + 1);
+            Alarms[alarmCount].price = iHigh(_Symbol, _Period, i); // Temp price
+            Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
+            Alarms[alarmCount].type  = 1; 
+            Alarms[alarmCount].barIndex = i; // This is the "Peak" candle before the drop
+            alarmCount++;
          }
       }
 
-      // CHECK FOR SWING LOW CANDIDATE
-      // Pattern: Red Candle (i) -> 2 Strong Green Candles (i-1, i-2)
+      // CHECK FOR LOW SIGNAL (Red -> 2 Green)
       if (IsRed(i))
       {
          bool isLow = true;
          for(int k=1; k<=ReversalCandles; k++) {
             if(!IsGreen(i-k) || !IsStrongBody(i-k)) { isLow = false; break; }
          }
-         
          if(isLow) {
-            ArrayResize(Candidates, candCount + 1);
-            Candidates[candCount].price = iLow(_Symbol, _Period, i);
-            Candidates[candCount].time  = iTime(_Symbol, _Period, i);
-            Candidates[candCount].type  = -1; // Low Candidate
-            Candidates[candCount].barIndex = i;
-            candCount++;
+            ArrayResize(Alarms, alarmCount + 1);
+            Alarms[alarmCount].price = iLow(_Symbol, _Period, i);
+            Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
+            Alarms[alarmCount].type  = -1; 
+            Alarms[alarmCount].barIndex = i; // This is the "Valley" candle before the rally
+            alarmCount++;
          }
       }
    }
    
-   if (candCount < 2) return;
+   if (alarmCount < 2) return;
 
-   // 2. FILTER CANDIDATES (The ZigZag Logic)
+   // 2. CONNECT AND REFINE (Find the True Vertex)
    ArrayResize(ZigZagPoints, 0);
-   int zzCount = 0;
    
-   // State Tracking
-   int currentMode = 0; // 0=Unknown, 1=Looking for High, -1=Looking for Low
-   int bestCandIndex = -1;
+   // Logic:
+   // We have a list of Alarms.
+   // We need to find the EXTREME PRICE between the previous point and the current Alarm.
    
-   // Initialize with first point
-   AddPoint(ZigZagPoints, Candidates[0]);
-   currentMode = (Candidates[0].type == 1) ? -1 : 1; // If started with High, look for Low
-   bestCandIndex = 0; // Current "Anchor"
-
-   for (int i = 1; i < candCount; i++)
+   // Start with the first alarm as a baseline
+   AddPoint(ZigZagPoints, Alarms[0]);
+   
+   int lastType = Alarms[0].type;     
+   int lastPointIndex = Alarms[0].barIndex; // Where the last line ended
+   
+   for (int i = 1; i < alarmCount; i++)
    {
-      // MODE: LOOKING FOR HIGH (We just made a Low)
-      if (currentMode == 1)
+      // --- LOOKING FOR HIGH ---
+      if (lastType == -1) // We last made a Low, now we want a High
       {
-         if (Candidates[i].type == 1) // Found a High Candidate
+         if (Alarms[i].type == 1) // Found a High Alarm
          {
-             // Is this High higher than our current best High?
-             // Or is it just the first one we found?
-             // We don't add it yet. We wait to see if a higher one comes along before a Low.
-             
-             // Simple Logic: Store pending High. 
-             // Ideally: We need to find the HIGHEST High between two Lows.
+            // KEY FIX: Don't just use the Alarm's price.
+            // Find the HIGHEST HIGH between the previous Low(lastPointIndex) and this Alarm(Alarms[i].barIndex)
+            
+            // We search from the Alarm index BACK to the Last Point index
+            // Note: Indices go from High (Past) to Low (Present). 
+            // So we search from Alarms[i].barIndex UP TO lastPointIndex
+            
+            double trueHighPrice = -1.0;
+            int trueHighIndex = -1;
+            
+            // Safety check for range
+            int searchEnd = lastPointIndex;
+            int searchStart = Alarms[i].barIndex; // Note: In MT4/5, Start < End (Start is newer)
+            
+            // Search backwards from the alarm to the previous low
+            // Actually, the alarm 'barIndex' is the candle BEFORE the 2 reversal candles.
+            // But the true high could be slightly before that if it was a cluster.
+            // Let's search the range.
+            
+            int pIndex = iHighest(_Symbol, _Period, MODE_HIGH, (searchEnd - searchStart + 1), searchStart);
+            
+            if (pIndex != -1) {
+               PointStruct refinedPoint;
+               refinedPoint.price = iHigh(_Symbol, _Period, pIndex);
+               refinedPoint.time  = iTime(_Symbol, _Period, pIndex);
+               refinedPoint.type  = 1;
+               refinedPoint.barIndex = pIndex;
+               
+               AddPoint(ZigZagPoints, refinedPoint);
+               
+               lastType = 1;
+               lastPointIndex = pIndex; // Start next search from this true peak
+            }
+         }
+      }
+      
+      // --- LOOKING FOR LOW ---
+      else if (lastType == 1) // We last made a High, now we want a Low
+      {
+         if (Alarms[i].type == -1) // Found a Low Alarm
+         {
+            // KEY FIX: Find the LOWEST LOW between previous High and this Alarm
+            int searchEnd = lastPointIndex;
+            int searchStart = Alarms[i].barIndex;
+            
+            int pIndex = iLowest(_Symbol, _Period, MODE_LOW, (searchEnd - searchStart + 1), searchStart);
+            
+            if (pIndex != -1) {
+               PointStruct refinedPoint;
+               refinedPoint.price = iLow(_Symbol, _Period, pIndex);
+               refinedPoint.time  = iTime(_Symbol, _Period, pIndex);
+               refinedPoint.type  = -1;
+               refinedPoint.barIndex = pIndex;
+               
+               AddPoint(ZigZagPoints, refinedPoint);
+               
+               lastType = -1;
+               lastPointIndex = pIndex; // Start next search from this true valley
+            }
          }
       }
    }
    
-   // --- SIMPLIFIED ZIGZAG ALGORITHM (Robust) ---
-   // This replaces the complex loop above with a standard "Extreme" finder
-   ArrayResize(ZigZagPoints, 0);
-   
-   // Assume first candidate is a starting point
-   AddPoint(ZigZagPoints, Candidates[0]);
-   
-   int lastType = Candidates[0].type;
-   double extremePrice = Candidates[0].price;
-   int extremeIndex = 0; // Index in Candidates array
-   
-   for (int i = 1; i < candCount; i++)
-   {
-      // If we last found a High, we are looking for a Low
-      if (lastType == 1) 
-      {
-         // If we find another High that is HIGHER, we update the previous point!
-         if (Candidates[i].type == 1 && Candidates[i].price > extremePrice) {
-            // Update the "Last Point" in our final array
-            UpdateLastPoint(ZigZagPoints, Candidates[i]);
-            extremePrice = Candidates[i].price;
-         }
-         // If we find a Low (Swing confirmed)
-         else if (Candidates[i].type == -1) {
-            AddPoint(ZigZagPoints, Candidates[i]); // Add the Low
-            lastType = -1; // Now looking for High
-            extremePrice = Candidates[i].price;
-         }
-      }
-      // If we last found a Low, we are looking for a High
-      else if (lastType == -1)
-      {
-         // If we find another Low that is LOWER, update previous
-         if (Candidates[i].type == -1 && Candidates[i].price < extremePrice) {
-            UpdateLastPoint(ZigZagPoints, Candidates[i]);
-            extremePrice = Candidates[i].price;
-         }
-         // If we find a High
-         else if (Candidates[i].type == 1) {
-            AddPoint(ZigZagPoints, Candidates[i]); // Add the High
-            lastType = 1; // Now looking for Low
-            extremePrice = Candidates[i].price;
-         }
-      }
-   }
-   
-   // 3. DRAW THE LINES
    DrawZigZag();
 }
 
@@ -216,11 +205,6 @@ void AddPoint(PointStruct &arr[], PointStruct &p) {
    int s = ArraySize(arr);
    ArrayResize(arr, s+1);
    arr[s] = p;
-}
-
-void UpdateLastPoint(PointStruct &arr[], PointStruct &p) {
-   int s = ArraySize(arr);
-   if (s > 0) arr[s-1] = p; // Overwrite last point with better extreme
 }
 
 bool IsStrongBody(int index) {
