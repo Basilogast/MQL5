@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V27.0_ColorCheck.mq5                       |
+//|         NCI_Structure_V28.0_GreedyMachine.mq5                    |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "27.00"
+#property version "28.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -34,7 +34,7 @@ int OnInit()
    trade.SetExpertMagicNumber(111222); 
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    UpdateZigZagMap();
-   Print(">>> V27 INIT: Color Consistency Check Loaded.");
+   Print(">>> V28 INIT: Greedy State Machine (Time-Flow Fixed).");
    return INIT_SUCCEEDED;
 }
 
@@ -44,115 +44,70 @@ void OnTick()
 }
 
 // ==========================================================
-//    THE LOGIC ENGINE
+//    THE ENGINE
 // ==========================================================
 void UpdateZigZagMap()
 {
+   // --- STEP 1: GATHER ALL RAW ALARMS (LOGIC SPLIT V27) ---
    PointStruct Alarms[];
    int alarmCount = 0;
-   
    int startBar = MathMin(HistoryBars, iBars(_Symbol, _Period)-10);
    
    for (int i = startBar; i >= 5; i--) 
    {
-      // --- CHECK FOR SWING HIGH (Pullback) ---
-      if (IsGreen(i)) 
-      {
-         int c1_idx = i - 1; 
-         int c2_idx = i - 2; // The 2nd Candle
-
-         if (IsRed(c1_idx)) 
-         {
-            bool isValid = false;
-            
-            // === LOGIC BRANCH 1: STRONG START ===
-            if (IsStrongBody(c1_idx)) 
-            {
-               // FIX: Even if C1 is Strong, C2 MUST BE RED (Continuous Reversal).
-               // It does not matter if C2 is weak/strong/inside, but it MUST be RED.
-               if (IsRed(c2_idx)) {
-                  isValid = true;
-               }
+      // [Logic Split Code from V27 - Detecting Valid Starts]
+      // 1. SWING HIGH (Pullback)
+      if (IsGreen(i)) {
+         int c1 = i-1; int c2 = i-2;
+         if (IsRed(c1)) {
+            bool valid = false;
+            // Strong Start (Continuous Color Rule)
+            if (IsStrongBody(c1)) {
+               if (IsRed(c2)) valid = true; 
             }
-            // === LOGIC BRANCH 2: WEAK START ===
-            else 
-            {
-               double rangeLow = iLow(_Symbol, _Period, c1_idx);
-               // Scan for Breakout
-               for (int k = 1; k <= MaxScanDistance; k++) 
-               {
-                  int next_idx = c1_idx - k;
-                  if (next_idx < 0) break;
-                  if (iHigh(_Symbol, _Period, next_idx) > iHigh(_Symbol, _Period, i)) break;
-                  
-                  // Must be Strong RED and Break Low
-                  if (IsRed(next_idx) && IsStrongBody(next_idx)) 
-                  {
-                     if (iClose(_Symbol, _Period, next_idx) < rangeLow) {
-                        isValid = true;
-                        break; 
-                     }
+            // Weak Start (Breakout Rule)
+            else {
+               double rangeLow = iLow(_Symbol, _Period, c1);
+               for (int k=1; k<=MaxScanDistance; k++) {
+                  int next = c1-k; if(next<0) break;
+                  if(iHigh(_Symbol, _Period, next) > iHigh(_Symbol, _Period, i)) break;
+                  if(IsRed(next) && IsStrongBody(next) && iClose(_Symbol, _Period, next) < rangeLow) {
+                     valid = true; break;
                   }
                }
             }
-            
-            if (isValid) {
-               ArrayResize(Alarms, alarmCount + 1);
-               Alarms[alarmCount].price = iHigh(_Symbol, _Period, i); 
-               Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
-               Alarms[alarmCount].type  = 1; 
-               Alarms[alarmCount].barIndex = i; 
+            if (valid) {
+               ArrayResize(Alarms, alarmCount+1);
+               Alarms[alarmCount].price = iHigh(_Symbol, _Period, i);
+               Alarms[alarmCount].time = iTime(_Symbol, _Period, i);
+               Alarms[alarmCount].type = 1; Alarms[alarmCount].barIndex = i;
                alarmCount++;
             }
          }
       }
-
-      // --- CHECK FOR SWING LOW (Rally) ---
-      if (IsRed(i))
-      {
-         int c1_idx = i - 1; 
-         int c2_idx = i - 2;
-
-         if (IsGreen(c1_idx)) 
-         {
-            bool isValid = false;
-            
-            // === LOGIC BRANCH 1: STRONG START ===
-            if (IsStrongBody(c1_idx)) 
-            {
-               // FIX: C2 MUST BE GREEN (Continuous Reversal)
-               if (IsGreen(c2_idx)) {
-                  isValid = true;
-               }
+      // 2. SWING LOW (Rally)
+      if (IsRed(i)) {
+         int c1 = i-1; int c2 = i-2;
+         if (IsGreen(c1)) {
+            bool valid = false;
+            if (IsStrongBody(c1)) {
+               if (IsGreen(c2)) valid = true;
             }
-            // === LOGIC BRANCH 2: WEAK START ===
-            else 
-            {
-               double rangeHigh = iHigh(_Symbol, _Period, c1_idx);
-               
-               for (int k = 1; k <= MaxScanDistance; k++) 
-               {
-                  int next_idx = c1_idx - k;
-                  if (next_idx < 0) break;
-                  if (iLow(_Symbol, _Period, next_idx) < iLow(_Symbol, _Period, i)) break;
-                  
-                  // Must be Strong GREEN and Break High
-                  if (IsGreen(next_idx) && IsStrongBody(next_idx)) 
-                  {
-                     if (iClose(_Symbol, _Period, next_idx) > rangeHigh) {
-                        isValid = true;
-                        break; 
-                     }
+            else {
+               double rangeHigh = iHigh(_Symbol, _Period, c1);
+               for (int k=1; k<=MaxScanDistance; k++) {
+                  int next = c1-k; if(next<0) break;
+                  if(iLow(_Symbol, _Period, next) < iLow(_Symbol, _Period, i)) break;
+                  if(IsGreen(next) && IsStrongBody(next) && iClose(_Symbol, _Period, next) > rangeHigh) {
+                     valid = true; break;
                   }
                }
             }
-            
-            if (isValid) {
-               ArrayResize(Alarms, alarmCount + 1);
+            if (valid) {
+               ArrayResize(Alarms, alarmCount+1);
                Alarms[alarmCount].price = iLow(_Symbol, _Period, i);
-               Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
-               Alarms[alarmCount].type  = -1; 
-               Alarms[alarmCount].barIndex = i; 
+               Alarms[alarmCount].time = iTime(_Symbol, _Period, i);
+               Alarms[alarmCount].type = -1; Alarms[alarmCount].barIndex = i;
                alarmCount++;
             }
          }
@@ -161,35 +116,87 @@ void UpdateZigZagMap()
    
    if (alarmCount < 2) return;
 
-   // 3. CONNECT AND REFINE (Vertex Engine - Unchanged)
+   // --- STEP 2: GREEDY STATE MACHINE (FIXED TIME FLOW) ---
    ArrayResize(ZigZagPoints, 0);
-   AddPoint(ZigZagPoints, Alarms[0]);
    
-   int lastType = Alarms[0].type;     
-   int lastPointIndex = Alarms[0].barIndex; 
+   // Init State
+   int state = 0; // 0=Init, 1=SeekingHigh, -1=SeekingLow
+   PointStruct pendingPoint; 
+   int lastCommittedIndex = startBar + 5; // Start boundary
    
+   // Set initial state based on first alarm
+   if (Alarms[0].type == 1) { // First is High
+       AddPoint(ZigZagPoints, Alarms[0]); // Commit it to start
+       lastCommittedIndex = Alarms[0].barIndex;
+       state = -1; // Look for Low
+       pendingPoint.price = 999999; // Init for Low search
+   } else {
+       AddPoint(ZigZagPoints, Alarms[0]);
+       lastCommittedIndex = Alarms[0].barIndex;
+       state = 1; // Look for High
+       pendingPoint.price = 0; // Init for High search
+   }
+
    for (int i = 1; i < alarmCount; i++)
    {
-      if (lastType == -1) {
-         if (Alarms[i].type == 1) {
-            int searchStart = Alarms[i].barIndex; 
-            int pIndex = iHighest(_Symbol, _Period, MODE_HIGH, (lastPointIndex - searchStart + 5), searchStart);
-            if (pIndex != -1) {
-               PointStruct p; p.price = iHigh(_Symbol, _Period, pIndex); p.time = iTime(_Symbol, _Period, pIndex); p.type = 1; p.barIndex = pIndex;
-               AddPoint(ZigZagPoints, p);
-               lastType = 1; lastPointIndex = pIndex;
-            }
+      // RANGE CALCULATION (Crucial Fix for Time Travel)
+      // We scan from LastCommittedIndex-1 down to Alarm.Index
+      // This ensures we NEVER go behind the last point.
+      int searchStart = Alarms[i].barIndex;
+      int searchEnd   = lastCommittedIndex - 1; 
+      int count       = searchEnd - searchStart + 1;
+      
+      if (count <= 0) continue; // Safety
+
+      // --- STATE: SEEKING HIGH ---
+      if (state == 1) 
+      {
+         // 1. Scan the range for the highest price
+         int highestIdx = iHighest(_Symbol, _Period, MODE_HIGH, count, searchStart);
+         double highestPrice = iHigh(_Symbol, _Period, highestIdx);
+         
+         // 2. Greedy Update: Is this better than our pending High?
+         if (highestPrice > pendingPoint.price) {
+            pendingPoint.price = highestPrice;
+            pendingPoint.time  = iTime(_Symbol, _Period, highestIdx);
+            pendingPoint.barIndex = highestIdx;
+            pendingPoint.type = 1;
+         }
+         
+         // 3. If we hit a LOW Alarm -> COMMIT the pending High
+         if (Alarms[i].type == -1) {
+            AddPoint(ZigZagPoints, pendingPoint);
+            lastCommittedIndex = pendingPoint.barIndex;
+            
+            // Switch State
+            state = -1;
+            pendingPoint.price = 999999; // Reset for Low search
+            // Re-evaluate this range for Low? 
+            // Better to let next iteration handle strict low search from the new committed high
+            i--; // Hack: Rewind one step to process this Low Alarm in the new state
          }
       }
-      else if (lastType == 1) {
-         if (Alarms[i].type == -1) {
-            int searchStart = Alarms[i].barIndex;
-            int pIndex = iLowest(_Symbol, _Period, MODE_LOW, (lastPointIndex - searchStart + 5), searchStart);
-            if (pIndex != -1) {
-               PointStruct p; p.price = iLow(_Symbol, _Period, pIndex); p.time = iTime(_Symbol, _Period, pIndex); p.type = -1; p.barIndex = pIndex;
-               AddPoint(ZigZagPoints, p);
-               lastType = -1; lastPointIndex = pIndex;
-            }
+      
+      // --- STATE: SEEKING LOW ---
+      else if (state == -1) 
+      {
+         int lowestIdx = iLowest(_Symbol, _Period, MODE_LOW, count, searchStart);
+         double lowestPrice = iLow(_Symbol, _Period, lowestIdx);
+         
+         if (lowestPrice < pendingPoint.price) {
+            pendingPoint.price = lowestPrice;
+            pendingPoint.time  = iTime(_Symbol, _Period, lowestIdx);
+            pendingPoint.barIndex = lowestIdx;
+            pendingPoint.type = -1;
+         }
+         
+         if (Alarms[i].type == 1) { // Hit a HIGH Alarm
+            AddPoint(ZigZagPoints, pendingPoint);
+            lastCommittedIndex = pendingPoint.barIndex;
+            
+            state = 1;
+            pendingPoint.price = 0; 
+            i--; // Rewind to process this High Alarm in new state
          }
       }
    }
