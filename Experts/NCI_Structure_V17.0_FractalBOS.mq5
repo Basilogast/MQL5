@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V17.0_FractalBOS.mq5                       |
+//|         NCI_Structure_V17.2_CleanVisuals.mq5                     |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "17.00"
+#property version "17.20"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -15,14 +15,14 @@ input int TrendEMA_Period   = 200;
 
 //--- 2. STRUCTURE SETTINGS
 input group "2. Structure Settings"
-input bool DrawLevels       = true;  // Draw the Key Levels on chart?
-input int Fractal_Depth     = 3;     // Bars required to confirm a fractal (Default 3)
+input bool ShowHistory      = true;  // Show old levels as dashed lines?
+input int Fractal_Depth     = 3;     
 
 //--- 3. ENTRY LOGIC
 input group "3. Entry Logic"
-input double MagnetPips     = 3.0;   // Tolerance for touching the line
+input double MagnetPips     = 3.0;   
 input double MinRiskReward  = 1.5;   
-input double StopBufferPips = 5.0;   // Place SL this far below the key level
+input double StopBufferPips = 5.0;   
 
 //--- 4. PROTECTION
 input group "4. Protection"
@@ -31,8 +31,8 @@ input double MaxCandleSizeATR = 2.5;
 
 //--- 5. MANAGEMENT
 input group "5. Trade Management"
-input double Target_RiskMultiple = 3.0; // Target is 3x Risk (1:3 RR)
-input double BreakEvenTrigger    = 1.0; // Move to BE when price moves 1x Risk
+input double Target_RiskMultiple = 3.0; 
+input double BreakEvenTrigger    = 1.0; 
 
 //--- 6. RISK
 input group "6. Risk Profiles"
@@ -43,11 +43,11 @@ int ATRHandle;
 int FractalHandle;
 CTrade trade;
 
-// GLOBAL VARIABLES TO STORE KEY LEVELS
-double Active_SupportLevel = 0;    // The "Buy Line" (Broken Resistance)
-double Active_ResistanceLevel = 0; // The "Sell Line" (Broken Support)
-datetime Support_Time = 0;
-datetime Resistance_Time = 0;
+// GLOBAL VARIABLES
+double Active_SupportLevel = 0;    
+double Active_ResistanceLevel = 0; 
+string Active_SupportName = "";
+string Active_ResistanceName = "";
 
 int OnInit()
 {
@@ -59,13 +59,12 @@ int OnInit()
    if (TrendHandle == INVALID_HANDLE || ATRHandle == INVALID_HANDLE || FractalHandle == INVALID_HANDLE) 
       return INIT_FAILED;
    
-   Print(">>> V17 INIT: Fractal Structure Strategy Started.");
    return INIT_SUCCEEDED;
 }
 
 void OnTick()
 {
-   UpdateKeyLevels(); // Scan for BOS
+   UpdateKeyLevels(); 
    ManageOpenPositions(); 
 
    double TrendMA[], Close[], Open[], Low[], High[], ATR[];
@@ -86,92 +85,147 @@ void OnTick()
    bool IsDowntrend = (Close[1] < TrendMA[1]);
    if (!UseTrendFilter) { IsUptrend = true; IsDowntrend = true; }
 
-   //--- ENTRY LOGIC (RETEST OF KEY LEVEL)
+   //--- VALIDATE ACTIVE LEVELS (Check for Breaks)
+   if (Active_SupportLevel > 0 && Close[1] < Active_SupportLevel) {
+      // Support Broken! Kill it.
+      if (ShowHistory) StyleAsBroken(Active_SupportName); 
+      else ObjectDelete(0, Active_SupportName);
+      Active_SupportLevel = 0; 
+      Active_SupportName = "";
+      Print(">>> LEVEL BROKEN: Support Failed.");
+   }
+
+   if (Active_ResistanceLevel > 0 && Close[1] > Active_ResistanceLevel) {
+      // Resistance Broken! Kill it.
+      if (ShowHistory) StyleAsBroken(Active_ResistanceName);
+      else ObjectDelete(0, Active_ResistanceName);
+      Active_ResistanceLevel = 0;
+      Active_ResistanceName = "";
+      Print(">>> LEVEL BROKEN: Resistance Failed.");
+   }
+
+   //--- ENTRY LOGIC
    if (IsNewBar() && PositionsTotal() < 1)
    {
       double magnet = MagnetPips * 10 * _Point;
 
-      // --- BUY SIGNAL (Retest of Active Support) ---
+      // BUY SIGNAL (Retest of Support)
       if (Active_SupportLevel > 0 && IsUptrend)
       {
-         // 1. Did we touch/dip near the level?
          bool Touched = (Low[1] <= Active_SupportLevel + magnet);
-         // 2. Did we close back ABOVE the level? (Respect)
          bool Respect = (Close[1] > Active_SupportLevel);
-         // 3. Is the signal candle GREEN?
          bool isGreen = (Close[1] > Open[1]);
          
          if (Touched && Respect && isGreen)
          {
             Print(">>> BUY SIGNAL: Retest of Support Level ", Active_SupportLevel);
             OpenTrade(ORDER_TYPE_BUY, Active_SupportLevel);
-            Active_SupportLevel = 0; // Reset level after use (One shot)
          }
       }
 
-      // --- SELL SIGNAL (Retest of Active Resistance) ---
+      // SELL SIGNAL (Retest of Resistance)
       if (Active_ResistanceLevel > 0 && IsDowntrend)
       {
-         // 1. Did we touch/rally near the level?
          bool Touched = (High[1] >= Active_ResistanceLevel - magnet);
-         // 2. Did we close back BELOW the level? (Respect)
          bool Respect = (Close[1] < Active_ResistanceLevel);
-         // 3. Is the signal candle RED?
          bool isRed   = (Close[1] < Open[1]);
          
          if (Touched && Respect && isRed)
          {
             Print(">>> SELL SIGNAL: Retest of Resistance Level ", Active_ResistanceLevel);
             OpenTrade(ORDER_TYPE_SELL, Active_ResistanceLevel);
-            Active_ResistanceLevel = 0; // Reset level after use
          }
       }
    }
 }
 
-//--- THE ENGINE: IDENTIFY BOS (Break of Structure) ---
+//--- THE ENGINE: IDENTIFY BOS ---
 void UpdateKeyLevels()
 {
-   if(!IsNewBar()) return; // Only scan on bar close
+   if(!IsNewBar()) return; 
 
    double UpFractals[], DownFractals[], Close[];
    ArraySetAsSeries(UpFractals, true); ArraySetAsSeries(DownFractals, true);
    ArraySetAsSeries(Close, true);
    
-   CopyBuffer(FractalHandle, 0, 0, 50, UpFractals);   // Upper Fractals
-   CopyBuffer(FractalHandle, 1, 0, 50, DownFractals); // Lower Fractals
+   CopyBuffer(FractalHandle, 0, 0, 50, UpFractals);   
+   CopyBuffer(FractalHandle, 1, 0, 50, DownFractals); 
    CopyClose(_Symbol, _Period, 0, 50, Close);
 
-   // 1. FIND RECENT FRACTALS
    double lastFractalHigh = 0;
    double lastFractalLow = 0;
    
-   // Loop skipping index 0-2 (Fractals need time to form/confirm)
    for(int i=3; i<50; i++) {
       if(UpFractals[i] != EMPTY_VALUE && lastFractalHigh == 0) lastFractalHigh = UpFractals[i];
       if(DownFractals[i] != EMPTY_VALUE && lastFractalLow == 0) lastFractalLow = DownFractals[i];
       if(lastFractalHigh > 0 && lastFractalLow > 0) break;
    }
 
-   // 2. CHECK FOR BULLISH BREAK (Resistance becomes Support)
-   // If Close[1] broke above the last Fractal High...
+   // 1. BULLISH BREAK (New Support Created)
    if (lastFractalHigh > 0 && Close[1] > lastFractalHigh && Close[2] <= lastFractalHigh)
    {
-      Active_SupportLevel = lastFractalHigh; // NEW KEY LEVEL
-      Support_Time = iTime(_Symbol, _Period, 1);
-      Print(">>> STRUCTURE BREAK (BOS): Resistance ", lastFractalHigh, " Broken. Now SUPPORT.");
-      if(DrawLevels) DrawLine("Key_Support", Active_SupportLevel, clrGreen);
+      if (MathAbs(Active_SupportLevel - lastFractalHigh) > _Point)
+      {
+         // Downgrade old level before replacing
+         if(Active_SupportName != "") StyleAsHistory(Active_SupportName);
+         
+         Active_SupportLevel = lastFractalHigh;
+         Active_SupportName = "Sup_" + TimeToString(iTime(_Symbol, _Period, 1));
+         Print(">>> NEW LEVEL: Support at ", Active_SupportLevel);
+         DrawActiveSegment(Active_SupportName, Active_SupportLevel, iTime(_Symbol, _Period, 1), clrGreen);
+      }
    }
 
-   // 3. CHECK FOR BEARISH BREAK (Support becomes Resistance)
-   // If Close[1] broke below the last Fractal Low...
+   // 2. BEARISH BREAK (New Resistance Created)
    if (lastFractalLow > 0 && Close[1] < lastFractalLow && Close[2] >= lastFractalLow)
    {
-      Active_ResistanceLevel = lastFractalLow; // NEW KEY LEVEL
-      Resistance_Time = iTime(_Symbol, _Period, 1);
-      Print(">>> STRUCTURE BREAK (BOS): Support ", lastFractalLow, " Broken. Now RESISTANCE.");
-      if(DrawLevels) DrawLine("Key_Resistance", Active_ResistanceLevel, clrRed);
+      if (MathAbs(Active_ResistanceLevel - lastFractalLow) > _Point)
+      {
+         // Downgrade old level before replacing
+         if(Active_ResistanceName != "") StyleAsHistory(Active_ResistanceName);
+         
+         Active_ResistanceLevel = lastFractalLow;
+         Active_ResistanceName = "Res_" + TimeToString(iTime(_Symbol, _Period, 1));
+         Print(">>> NEW LEVEL: Resistance at ", Active_ResistanceLevel);
+         DrawActiveSegment(Active_ResistanceName, Active_ResistanceLevel, iTime(_Symbol, _Period, 1), clrRed);
+      }
    }
+}
+
+//--- VISUAL FUNCTIONS ---
+void DrawActiveSegment(string name, double price, datetime start, color col)
+{
+   if (ObjectFind(0, name) < 0) {
+      ObjectCreate(0, name, OBJ_TREND, 0, start, price, TimeCurrent(), price);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2); // Thick
+      ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true); 
+   }
+   ChartRedraw();
+}
+
+void StyleAsHistory(string name)
+{
+   if (ObjectFind(0, name) >= 0) {
+      ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT); // Dashed
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); // Thin
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false); // Stop extending
+      ObjectSetInteger(0, name, OBJPROP_TIME, 1, TimeCurrent()); // End line here
+   }
+   ChartRedraw();
+}
+
+void StyleAsBroken(string name)
+{
+   if (ObjectFind(0, name) >= 0) {
+      ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clrGray); // Grey out
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
+      ObjectSetInteger(0, name, OBJPROP_TIME, 1, TimeCurrent()); 
+   }
+   ChartRedraw();
 }
 
 void OpenTrade(ENUM_ORDER_TYPE type, double keyLevel)
@@ -179,7 +233,6 @@ void OpenTrade(ENUM_ORDER_TYPE type, double keyLevel)
    double currentPrice = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl, tp;
    
-   // SL placed behind the Key Level
    if (type == ORDER_TYPE_BUY) {
       sl = keyLevel - (StopBufferPips * 10 * _Point);
       double risk = currentPrice - sl;
@@ -191,10 +244,9 @@ void OpenTrade(ENUM_ORDER_TYPE type, double keyLevel)
       tp = currentPrice - (risk * Target_RiskMultiple);
    }
 
-   // Check Risk Reward (Safety)
-   if (MathAbs(currentPrice - sl) < 10*_Point) return; // Too close
+   if (MathAbs(currentPrice - sl) < 10*_Point) return; 
 
-   trade.PositionOpen(_Symbol, type, CalculateLotSize(sl), currentPrice, sl, tp, "Struct_V17");
+   trade.PositionOpen(_Symbol, type, CalculateLotSize(sl), currentPrice, sl, tp, "Struct_V17.2");
 }
 
 double CalculateLotSize(double sl_price)
@@ -229,7 +281,6 @@ void ManageOpenPositions()
       double total_dist = MathAbs(tp - open);
       double current_dist = MathAbs(current - open);
       
-      // Break Even Logic
       if (total_dist > 0 && (current_dist / MathAbs(open-sl)) > BreakEvenTrigger) {
          if (PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY && sl < open) 
             trade.PositionModify(ticket, open + 10*_Point, tp);
@@ -237,17 +288,6 @@ void ManageOpenPositions()
             trade.PositionModify(ticket, open - 10*_Point, tp);
       }
    }
-}
-
-void DrawLine(string name, double price, color col)
-{
-   string objName = name;
-   ObjectDelete(0, objName); // Delete old one
-   ObjectCreate(0, objName, OBJ_HLINE, 0, 0, price);
-   ObjectSetInteger(0, objName, OBJPROP_COLOR, col);
-   ObjectSetInteger(0, objName, OBJPROP_WIDTH, 2);
-   ObjectSetInteger(0, objName, OBJPROP_STYLE, STYLE_SOLID);
-   ChartRedraw();
 }
 
 bool IsNewBar() {
