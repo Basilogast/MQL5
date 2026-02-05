@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V23.0_VertexFix.mq5                        |
+//|         NCI_Structure_V27.0_ColorCheck.mq5                       |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "23.00"
+#property version "27.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -14,10 +14,10 @@ input int HistoryBars       = 1000;
 input color LineColor       = clrWhite; 
 input int LineWidth         = 2;
 
-//--- 2. STRICT RULES (The "Alarm")
-input group "Strict Rules"
+//--- 2. STRUCTURE RULES
+input group "Structure Rules"
 input double MinBodyPercent = 0.50;  
-input int ReversalCandles   = 2;     
+input int MaxScanDistance   = 3;     
 
 //--- GLOBALS
 CTrade trade;
@@ -34,7 +34,7 @@ int OnInit()
    trade.SetExpertMagicNumber(111222); 
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    UpdateZigZagMap();
-   Print(">>> V23 INIT: Vertex Precision Engine Loaded.");
+   Print(">>> V27 INIT: Color Consistency Check Loaded.");
    return INIT_SUCCEEDED;
 }
 
@@ -44,134 +44,151 @@ void OnTick()
 }
 
 // ==========================================================
-//    THE VERTEX ENGINE
+//    THE LOGIC ENGINE
 // ==========================================================
 void UpdateZigZagMap()
 {
-   // 1. FIND "ALARMS" (Strict Candidates)
-   // These are just the bars where the 2-candle pattern COMPLETED.
    PointStruct Alarms[];
    int alarmCount = 0;
    
-   int startBar = MathMin(HistoryBars, iBars(_Symbol, _Period)-ReversalCandles-1);
+   int startBar = MathMin(HistoryBars, iBars(_Symbol, _Period)-10);
    
-   for (int i = startBar; i >= ReversalCandles; i--) 
+   for (int i = startBar; i >= 5; i--) 
    {
-      // CHECK FOR HIGH SIGNAL (Green -> 2 Red)
+      // --- CHECK FOR SWING HIGH (Pullback) ---
       if (IsGreen(i)) 
       {
-         bool isHigh = true;
-         for(int k=1; k<=ReversalCandles; k++) {
-            if(!IsRed(i-k) || !IsStrongBody(i-k)) { isHigh = false; break; }
-         }
-         if(isHigh) {
-            ArrayResize(Alarms, alarmCount + 1);
-            Alarms[alarmCount].price = iHigh(_Symbol, _Period, i); // Temp price
-            Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
-            Alarms[alarmCount].type  = 1; 
-            Alarms[alarmCount].barIndex = i; // This is the "Peak" candle before the drop
-            alarmCount++;
+         int c1_idx = i - 1; 
+         int c2_idx = i - 2; // The 2nd Candle
+
+         if (IsRed(c1_idx)) 
+         {
+            bool isValid = false;
+            
+            // === LOGIC BRANCH 1: STRONG START ===
+            if (IsStrongBody(c1_idx)) 
+            {
+               // FIX: Even if C1 is Strong, C2 MUST BE RED (Continuous Reversal).
+               // It does not matter if C2 is weak/strong/inside, but it MUST be RED.
+               if (IsRed(c2_idx)) {
+                  isValid = true;
+               }
+            }
+            // === LOGIC BRANCH 2: WEAK START ===
+            else 
+            {
+               double rangeLow = iLow(_Symbol, _Period, c1_idx);
+               // Scan for Breakout
+               for (int k = 1; k <= MaxScanDistance; k++) 
+               {
+                  int next_idx = c1_idx - k;
+                  if (next_idx < 0) break;
+                  if (iHigh(_Symbol, _Period, next_idx) > iHigh(_Symbol, _Period, i)) break;
+                  
+                  // Must be Strong RED and Break Low
+                  if (IsRed(next_idx) && IsStrongBody(next_idx)) 
+                  {
+                     if (iClose(_Symbol, _Period, next_idx) < rangeLow) {
+                        isValid = true;
+                        break; 
+                     }
+                  }
+               }
+            }
+            
+            if (isValid) {
+               ArrayResize(Alarms, alarmCount + 1);
+               Alarms[alarmCount].price = iHigh(_Symbol, _Period, i); 
+               Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
+               Alarms[alarmCount].type  = 1; 
+               Alarms[alarmCount].barIndex = i; 
+               alarmCount++;
+            }
          }
       }
 
-      // CHECK FOR LOW SIGNAL (Red -> 2 Green)
+      // --- CHECK FOR SWING LOW (Rally) ---
       if (IsRed(i))
       {
-         bool isLow = true;
-         for(int k=1; k<=ReversalCandles; k++) {
-            if(!IsGreen(i-k) || !IsStrongBody(i-k)) { isLow = false; break; }
-         }
-         if(isLow) {
-            ArrayResize(Alarms, alarmCount + 1);
-            Alarms[alarmCount].price = iLow(_Symbol, _Period, i);
-            Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
-            Alarms[alarmCount].type  = -1; 
-            Alarms[alarmCount].barIndex = i; // This is the "Valley" candle before the rally
-            alarmCount++;
+         int c1_idx = i - 1; 
+         int c2_idx = i - 2;
+
+         if (IsGreen(c1_idx)) 
+         {
+            bool isValid = false;
+            
+            // === LOGIC BRANCH 1: STRONG START ===
+            if (IsStrongBody(c1_idx)) 
+            {
+               // FIX: C2 MUST BE GREEN (Continuous Reversal)
+               if (IsGreen(c2_idx)) {
+                  isValid = true;
+               }
+            }
+            // === LOGIC BRANCH 2: WEAK START ===
+            else 
+            {
+               double rangeHigh = iHigh(_Symbol, _Period, c1_idx);
+               
+               for (int k = 1; k <= MaxScanDistance; k++) 
+               {
+                  int next_idx = c1_idx - k;
+                  if (next_idx < 0) break;
+                  if (iLow(_Symbol, _Period, next_idx) < iLow(_Symbol, _Period, i)) break;
+                  
+                  // Must be Strong GREEN and Break High
+                  if (IsGreen(next_idx) && IsStrongBody(next_idx)) 
+                  {
+                     if (iClose(_Symbol, _Period, next_idx) > rangeHigh) {
+                        isValid = true;
+                        break; 
+                     }
+                  }
+               }
+            }
+            
+            if (isValid) {
+               ArrayResize(Alarms, alarmCount + 1);
+               Alarms[alarmCount].price = iLow(_Symbol, _Period, i);
+               Alarms[alarmCount].time  = iTime(_Symbol, _Period, i);
+               Alarms[alarmCount].type  = -1; 
+               Alarms[alarmCount].barIndex = i; 
+               alarmCount++;
+            }
          }
       }
    }
    
    if (alarmCount < 2) return;
 
-   // 2. CONNECT AND REFINE (Find the True Vertex)
+   // 3. CONNECT AND REFINE (Vertex Engine - Unchanged)
    ArrayResize(ZigZagPoints, 0);
-   
-   // Logic:
-   // We have a list of Alarms.
-   // We need to find the EXTREME PRICE between the previous point and the current Alarm.
-   
-   // Start with the first alarm as a baseline
    AddPoint(ZigZagPoints, Alarms[0]);
    
    int lastType = Alarms[0].type;     
-   int lastPointIndex = Alarms[0].barIndex; // Where the last line ended
+   int lastPointIndex = Alarms[0].barIndex; 
    
    for (int i = 1; i < alarmCount; i++)
    {
-      // --- LOOKING FOR HIGH ---
-      if (lastType == -1) // We last made a Low, now we want a High
-      {
-         if (Alarms[i].type == 1) // Found a High Alarm
-         {
-            // KEY FIX: Don't just use the Alarm's price.
-            // Find the HIGHEST HIGH between the previous Low(lastPointIndex) and this Alarm(Alarms[i].barIndex)
-            
-            // We search from the Alarm index BACK to the Last Point index
-            // Note: Indices go from High (Past) to Low (Present). 
-            // So we search from Alarms[i].barIndex UP TO lastPointIndex
-            
-            double trueHighPrice = -1.0;
-            int trueHighIndex = -1;
-            
-            // Safety check for range
-            int searchEnd = lastPointIndex;
-            int searchStart = Alarms[i].barIndex; // Note: In MT4/5, Start < End (Start is newer)
-            
-            // Search backwards from the alarm to the previous low
-            // Actually, the alarm 'barIndex' is the candle BEFORE the 2 reversal candles.
-            // But the true high could be slightly before that if it was a cluster.
-            // Let's search the range.
-            
-            int pIndex = iHighest(_Symbol, _Period, MODE_HIGH, (searchEnd - searchStart + 1), searchStart);
-            
+      if (lastType == -1) {
+         if (Alarms[i].type == 1) {
+            int searchStart = Alarms[i].barIndex; 
+            int pIndex = iHighest(_Symbol, _Period, MODE_HIGH, (lastPointIndex - searchStart + 5), searchStart);
             if (pIndex != -1) {
-               PointStruct refinedPoint;
-               refinedPoint.price = iHigh(_Symbol, _Period, pIndex);
-               refinedPoint.time  = iTime(_Symbol, _Period, pIndex);
-               refinedPoint.type  = 1;
-               refinedPoint.barIndex = pIndex;
-               
-               AddPoint(ZigZagPoints, refinedPoint);
-               
-               lastType = 1;
-               lastPointIndex = pIndex; // Start next search from this true peak
+               PointStruct p; p.price = iHigh(_Symbol, _Period, pIndex); p.time = iTime(_Symbol, _Period, pIndex); p.type = 1; p.barIndex = pIndex;
+               AddPoint(ZigZagPoints, p);
+               lastType = 1; lastPointIndex = pIndex;
             }
          }
       }
-      
-      // --- LOOKING FOR LOW ---
-      else if (lastType == 1) // We last made a High, now we want a Low
-      {
-         if (Alarms[i].type == -1) // Found a Low Alarm
-         {
-            // KEY FIX: Find the LOWEST LOW between previous High and this Alarm
-            int searchEnd = lastPointIndex;
+      else if (lastType == 1) {
+         if (Alarms[i].type == -1) {
             int searchStart = Alarms[i].barIndex;
-            
-            int pIndex = iLowest(_Symbol, _Period, MODE_LOW, (searchEnd - searchStart + 1), searchStart);
-            
+            int pIndex = iLowest(_Symbol, _Period, MODE_LOW, (lastPointIndex - searchStart + 5), searchStart);
             if (pIndex != -1) {
-               PointStruct refinedPoint;
-               refinedPoint.price = iLow(_Symbol, _Period, pIndex);
-               refinedPoint.time  = iTime(_Symbol, _Period, pIndex);
-               refinedPoint.type  = -1;
-               refinedPoint.barIndex = pIndex;
-               
-               AddPoint(ZigZagPoints, refinedPoint);
-               
-               lastType = -1;
-               lastPointIndex = pIndex; // Start next search from this true valley
+               PointStruct p; p.price = iLow(_Symbol, _Period, pIndex); p.time = iTime(_Symbol, _Period, pIndex); p.type = -1; p.barIndex = pIndex;
+               AddPoint(ZigZagPoints, p);
+               lastType = -1; lastPointIndex = pIndex;
             }
          }
       }
@@ -180,17 +197,12 @@ void UpdateZigZagMap()
    DrawZigZag();
 }
 
-// ==========================================================
-//    DRAWING & HELPERS
-// ==========================================================
 void DrawZigZag()
 {
    ObjectsDeleteAll(0, "NCI_ZZ_");
    int count = ArraySize(ZigZagPoints);
    if (count < 2) return;
-   
-   for (int i = 1; i < count; i++)
-   {
+   for (int i = 1; i < count; i++) {
       string name = "NCI_ZZ_" + IntegerToString(i);
       ObjectCreate(0, name, OBJ_TREND, 0, ZigZagPoints[i-1].time, ZigZagPoints[i-1].price, ZigZagPoints[i].time, ZigZagPoints[i].price);
       ObjectSetInteger(0, name, OBJPROP_COLOR, LineColor);
@@ -214,10 +226,8 @@ bool IsStrongBody(int index) {
    double b = MathAbs(iOpen(_Symbol, _Period, index) - iClose(_Symbol, _Period, index));
    return (b > (h-l) * MinBodyPercent);
 }
-
 bool IsGreen(int index) { return iClose(_Symbol, _Period, index) > iOpen(_Symbol, _Period, index); }
 bool IsRed(int index) { return iClose(_Symbol, _Period, index) < iOpen(_Symbol, _Period, index); }
-
 bool IsNewBar() {
    static datetime last;
    datetime curr = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
