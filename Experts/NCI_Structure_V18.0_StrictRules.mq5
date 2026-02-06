@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V41.0_VisualFix.mq5                        |
+//|         NCI_Structure_V42.0_MomentumBreak.mq5                    |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "41.00"
+#property version "42.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -55,7 +55,7 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V41 INIT: Visual Fix (Safety Net Logic) Loaded.");
+   Print(">>> V42 INIT: Momentum Breakout Logic (2-Candle Follow Through) Loaded.");
    return INIT_SUCCEEDED;
 }
 
@@ -156,14 +156,14 @@ void UpdateZigZagMap()
 }
 
 // ==========================================================
-//    NEW: LOGIC ENGINE (V41 Fixed)
+//    NEW: LOGIC ENGINE (V42 Momentum)
 // ==========================================================
 void CalculateTrendsAndLock()
 {
    int count = ArraySize(ZigZagPoints);
    if (count < 2) return;
    
-   int runningTrend = 0; // Start Yellow
+   int runningTrend = 0; 
    
    double lastSupplyLevel = 0; int lastSupplyIdx = -1;
    double lastDemandLevel = 0; int lastDemandIdx = -1;
@@ -176,7 +176,7 @@ void CalculateTrendsAndLock()
       PointStruct p = ZigZagPoints[i];     
       PointStruct prev = ZigZagPoints[i-1];
       
-      // 1. UPDATE STRUCTURE MEMORY (Before processing current leg)
+      // 1. UPDATE STRUCTURE MEMORY
       if (prev.type == 1) { 
          lastSupplyLevel = prev.zoneLimitTop; 
          lastSupplyIdx = prev.barIndex;
@@ -188,23 +188,13 @@ void CalculateTrendsAndLock()
          prevLow = prev.price; 
       }
 
-      // 2. CHECK BREAKOUTS
+      // 2. CHECK BREAKOUTS (V42: MOMENTUM LOGIC)
       bool brokenSupply = false;
       bool brokenDemand = false;
       
-      // A. Strict Check
+      // We ONLY check strictly now. No "Safety Net" based on ZigZag Wicks.
       if (lastSupplyIdx != -1) brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
       if (lastDemandIdx != -1) brokenDemand = CheckForBreakout(lastDemandIdx, p.barIndex, lastDemandLevel, -1);
-
-      // B. Structural Safety Net (Visual Fix)
-      // If we are currently Down, but this High is physically ABOVE the Supply Zone -> FORCE BREAK
-      if (runningTrend == -1 && p.type == 1 && lastSupplyLevel != 0 && p.price > lastSupplyLevel) {
-         brokenSupply = true;
-      }
-      // If we are currently Up, but this Low is physically BELOW the Demand Zone -> FORCE BREAK
-      if (runningTrend == 1 && p.type == -1 && lastDemandLevel != 0 && p.price < lastDemandLevel) {
-         brokenDemand = true;
-      }
 
       // 3. STATE MACHINE TRANSITIONS
       
@@ -212,7 +202,7 @@ void CalculateTrendsAndLock()
       if (runningTrend == -1) 
       {
          if (brokenSupply) {
-            runningTrend = 0; // Break -> Yellow
+            runningTrend = 0; // Supply Broken -> Switch to YELLOW
          }
       }
       
@@ -220,38 +210,83 @@ void CalculateTrendsAndLock()
       else if (runningTrend == 1)
       {
          if (brokenDemand) {
-            runningTrend = 0; // Break -> Yellow
+            runningTrend = 0; // Demand Broken -> Switch to YELLOW
          }
       }
       
       // --- STATE: FLUCTUATE (Yellow) ---
       else 
       {
-         // Try to confirm GREEN
-         if (p.type == 1) { // We made a High
-            // If we broke Supply (now or earlier) AND we are making Higher Highs
-            if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) {
-               // Ensure Demand holds
-               if (!brokenDemand) runningTrend = 1;
-            }
+         // Wait for Pattern Confirmation
+         
+         // A. Check for GREEN Transition
+         if (p.type == 1) { 
+             // If we broke Supply AND we are making Higher Highs
+             if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) {
+                 if (!brokenDemand) runningTrend = 1;
+             }
          }
          
-         // Try to confirm RED
-         if (p.type == -1) { // We made a Low
-            // If we broke Demand (now or earlier) AND we are making Lower Lows
-            if (brokenDemand || (prevLow != 0 && p.price < prevLow)) {
-               // Ensure Supply holds
-               if (!brokenSupply) runningTrend = -1;
-            }
+         // B. Check for RED Transition
+         if (p.type == -1) { 
+             // If we broke Demand AND we are making Lower Lows
+             if (brokenDemand || (prevLow != 0 && p.price < prevLow)) {
+                 if (!brokenSupply) runningTrend = -1;
+             }
          }
          
-         // Logic Fix: If we broke supply in THIS leg, this leg becomes Yellow.
-         // Next leg will check for pattern.
+         // C. Fallback: Immediate breakout follow-through
+         if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) runningTrend = 1;
+         if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) runningTrend = -1;
       }
       
       // 4. LOCK STATE
       ZigZagPoints[i].assignedTrend = runningTrend;
    }
+}
+
+// ==========================================================
+//    NEW BREAKOUT CHECK (V42 MOMENTUM)
+// ==========================================================
+bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type)
+{
+   // Scan candles between the old zone and new point
+   // Note: i is older (Candle 1), i-1 is newer (Candle 2)
+   for (int i = startBarIdx - 1; i > endBarIdx; i--) 
+   {
+      // --- SUPPLY BREAK (UP) ---
+      if (type == 1) 
+      { 
+         double c1 = iClose(_Symbol, _Period, i);
+         double c2 = iClose(_Symbol, _Period, i-1);
+         
+         // RULE 1: Candle 1 Close > Zone
+         if (c1 > level) {
+            // RULE 2: Candle 2 Close > Zone
+            if (c2 > level) {
+               // RULE 3: Momentum (Candle 2 Higher than Candle 1)
+               if (c2 > c1) return true;
+            }
+         }
+      }
+      
+      // --- DEMAND BREAK (DOWN) ---
+      else 
+      { 
+         double c1 = iClose(_Symbol, _Period, i);
+         double c2 = iClose(_Symbol, _Period, i-1);
+         
+         // RULE 1: Candle 1 Close < Zone
+         if (c1 < level) {
+            // RULE 2: Candle 2 Close < Zone
+            if (c2 < level) {
+               // RULE 3: Momentum (Candle 2 Lower than Candle 1)
+               if (c2 < c1) return true;
+            }
+         }
+      }
+   }
+   return false;
 }
 
 // ==========================================================
@@ -323,13 +358,6 @@ void DrawParallelZones()
 
 // --- HELPERS (Unchanged) ---
 void StartZone(MergedZoneState &state, PointStruct &p) { state.isActive=true; state.top=p.zoneLimitTop; state.bottom=p.zoneLimitBottom; state.startTime=p.time; state.lastBarIndex=p.barIndex; }
-bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) {
-   for (int i = startBarIdx - 1; i > endBarIdx; i--) {
-      if (i-1 < 0) return false;
-      if (type == 1) { if (iClose(_Symbol, _Period, i) > level && IsStrongBody(i) && IsGreen(i)) { if (iClose(_Symbol, _Period, i-1) > level && IsStrongBody(i-1) && IsGreen(i-1)) return true; } }
-      else { if (iClose(_Symbol, _Period, i) < level && IsStrongBody(i) && IsRed(i)) { if (iClose(_Symbol, _Period, i-1) < level && IsStrongBody(i-1) && IsRed(i-1)) return true; } }
-   } return false;
-}
 void CalculateZoneLimits(PointStruct &p) {
    p.zoneLimitTop = p.price; p.zoneLimitBottom = p.price; 
    if (p.type == 1) { int gI=-1, rI=-1; for(int k=0;k<=5;k++){if(IsGreen(p.barIndex+k)){gI=p.barIndex+k;break;}} if(gI!=-1) rI=gI-1; if(gI!=-1) { p.zoneLimitBottom = iOpen(_Symbol,_Period,gI); if(IsBigCandle(gI)){ if(rI!=-1){ p.zoneLimitBottom = iOpen(_Symbol,_Period,rI); if(IsBigCandle(rI)) p.zoneLimitBottom=(iOpen(_Symbol,_Period,rI)+iClose(_Symbol,_Period,rI))/2.0; } else p.zoneLimitBottom=(iOpen(_Symbol,_Period,gI)+iClose(_Symbol,_Period,gI))/2.0; } } } 
