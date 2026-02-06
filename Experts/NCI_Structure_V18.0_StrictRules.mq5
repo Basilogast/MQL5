@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V45.0_CrashProof.mq5                       |
+//|         NCI_Structure_V47.0_TripleTap.mq5                        |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "45.00"
+#property version "47.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -30,12 +30,13 @@ input double BigCandleFactor = 1.3;
 
 //--- 4. TRADING SETTINGS
 input group "Trading Logic"
-input bool AllowTrading     = true;
-input double RiskPercent    = 1.0;
-input double MinRiskReward  = 2.0;
-input double EntryZoneDepth = 0.30;
-input double TPZoneDepth    = 0.0;
-input double SLBufferPoints = 50;
+input bool AllowTrading      = true;
+input double RiskPercent     = 1.0;
+input double MinRiskReward   = 2.0;
+input double EntryZoneDepth  = 0.30; // Start looking here (30%)
+input double MaxZoneDepth    = 0.50; // STOP looking here (50%) - The new filter
+input double TPZoneDepth     = 0.0;
+input double SLBufferPoints  = 50;
 
 //--- GLOBALS
 CTrade trade;
@@ -62,13 +63,15 @@ MergedZoneState activeSupply;
 MergedZoneState activeDemand;
 int currentMarketTrend = 0;
 
+// (Removed LastTradedZoneTime to allow Triple Tops/Bottoms)
+
 int OnInit()
 {
    trade.SetExpertMagicNumber(111222); 
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V45 INIT: Crash Proof Engine (Safe Arrays) Loaded.");
+   Print(">>> V47 INIT: Triple Tap Logic (Re-Entry Allowed + 50% Depth Limit).");
    return INIT_SUCCEEDED;
 }
 
@@ -79,232 +82,65 @@ void OnTick()
 }
 
 // ==========================================================
-//    MAIN ENGINE (Uncompressed & Safe)
-// ==========================================================
-void UpdateZigZagMap()
-{
-   // SAFETY: Don't run if history is not ready
-   int totalBars = iBars(_Symbol, _Period);
-   if (totalBars < 500) return;
-
-   // --- STEP 1: GATHER RAW ALARMS ---
-   PointStruct Alarms[];
-   int alarmCount = 0;
-   int startBar = MathMin(HistoryBars, totalBars - 10);
-   
-   for (int i = startBar; i >= 5; i--) 
-   {
-      // Check Highs
-      if (IsGreen(i)) {
-         int c1=i-1; int c2=i-2;
-         if(IsRed(c1)){
-            bool v=false;
-            if(IsStrongBody(c1)){ 
-               if(IsRed(c2)) v=true; 
-            }
-            else{
-               double rl=iLow(_Symbol,_Period,c1);
-               for(int k=1;k<=MaxScanDistance;k++){
-                  int n=c1-k; 
-                  if(n<0||iHigh(_Symbol,_Period,n)>iHigh(_Symbol,_Period,i))break;
-                  if(IsRed(n)&&IsStrongBody(n)&&iClose(_Symbol,_Period,n)<rl){v=true;break;}
-               }
-            }
-            if(v){
-               ArrayResize(Alarms, alarmCount+1);
-               Alarms[alarmCount].price=iHigh(_Symbol,_Period,i);
-               Alarms[alarmCount].time=iTime(_Symbol,_Period,i);
-               Alarms[alarmCount].type=1;
-               Alarms[alarmCount].barIndex=i;
-               alarmCount++;
-            }
-         }
-      }
-      // Check Lows
-      if (IsRed(i)) {
-         int c1=i-1; int c2=i-2;
-         if(IsGreen(c1)){
-            bool v=false;
-            if(IsStrongBody(c1)){ 
-               if(IsGreen(c2)) v=true; 
-            }
-            else{
-               double rh=iHigh(_Symbol,_Period,c1);
-               for(int k=1;k<=MaxScanDistance;k++){
-                  int n=c1-k; 
-                  if(n<0||iLow(_Symbol,_Period,n)<iLow(_Symbol,_Period,i))break;
-                  if(IsGreen(n)&&IsStrongBody(n)&&iClose(_Symbol,_Period,n)>rh){v=true;break;}
-               }
-            }
-            if(v){
-               ArrayResize(Alarms, alarmCount+1);
-               Alarms[alarmCount].price=iLow(_Symbol,_Period,i);
-               Alarms[alarmCount].time=iTime(_Symbol,_Period,i);
-               Alarms[alarmCount].type=-1;
-               Alarms[alarmCount].barIndex=i;
-               alarmCount++;
-            }
-         }
-      }
-   }
-   
-   if (alarmCount < 2) return;
-   
-   // --- STEP 2: GREEDY ZIGZAG ---
-   ArrayResize(ZigZagPoints, 0);
-   int state = 0; 
-   PointStruct pendingPoint; 
-   int lastCommittedIndex = startBar + 5;
-   
-   // Init State
-   if (Alarms[0].type == 1) { 
-       AddPoint(ZigZagPoints, Alarms[0]); 
-       lastCommittedIndex = Alarms[0].barIndex; 
-       state = -1; 
-       pendingPoint.price = 999999; 
-   } else {
-       AddPoint(ZigZagPoints, Alarms[0]); 
-       lastCommittedIndex = Alarms[0].barIndex; 
-       state = 1; 
-       pendingPoint.price = 0; 
-   }
-
-   for (int i = 1; i < alarmCount; i++)
-   {
-      int searchStart = Alarms[i].barIndex;
-      int searchEnd   = lastCommittedIndex - 1; 
-      int count       = searchEnd - searchStart + 1;
-      
-      if (count <= 0) continue;
-
-      if (state == 1) {
-         int hI = iHighest(_Symbol, _Period, MODE_HIGH, count, searchStart);
-         double hP = iHigh(_Symbol, _Period, hI);
-         
-         if (hP > pendingPoint.price) { 
-            pendingPoint.price=hP; 
-            pendingPoint.time=iTime(_Symbol,_Period,hI); 
-            pendingPoint.barIndex=hI; 
-            pendingPoint.type=1; 
-         }
-         
-         if (Alarms[i].type == -1) { 
-            AddPoint(ZigZagPoints, pendingPoint); 
-            lastCommittedIndex=pendingPoint.barIndex; 
-            state=-1; 
-            pendingPoint.price=999999; 
-            i--; 
-         }
-      }
-      else if (state == -1) {
-         int lI = iLowest(_Symbol, _Period, MODE_LOW, count, searchStart);
-         double lP = iLow(_Symbol, _Period, lI);
-         
-         if (lP < pendingPoint.price) { 
-            pendingPoint.price=lP; 
-            pendingPoint.time=iTime(_Symbol,_Period,lI); 
-            pendingPoint.barIndex=lI; 
-            pendingPoint.type=-1; 
-         }
-         
-         if (Alarms[i].type == 1) { 
-            AddPoint(ZigZagPoints, pendingPoint); 
-            lastCommittedIndex=pendingPoint.barIndex; 
-            state=1; 
-            pendingPoint.price=0; 
-            i--; 
-         }
-      }
-   }
-   
-   // Pre-calc limits
-   int zzCount = ArraySize(ZigZagPoints);
-   for(int i=0; i<zzCount; i++) CalculateZoneLimits(ZigZagPoints[i]);
-
-   CalculateTrendsAndLock();
-   DrawZigZagLines(); 
-   if(DrawZones) DrawParallelZones(); 
-}
-
-// ==========================================================
-//    TREND LOGIC (V42 Momentum)
-// ==========================================================
-void CalculateTrendsAndLock()
-{
-   int count = ArraySize(ZigZagPoints);
-   if (count < 2) return;
-   
-   int runningTrend = 0; 
-   double lastSupplyLevel = 0; int lastSupplyIdx = -1;
-   double lastDemandLevel = 0; int lastDemandIdx = -1;
-   double prevHigh = 0; double prevLow = 0;
-   
-   for (int i = 1; i < count; i++)
-   {
-      PointStruct p = ZigZagPoints[i];     
-      PointStruct prev = ZigZagPoints[i-1];
-      
-      if (prev.type == 1) { lastSupplyLevel = prev.zoneLimitTop; lastSupplyIdx = prev.barIndex; prevHigh = prev.price; }
-      if (prev.type == -1) { lastDemandLevel = prev.zoneLimitBottom; lastDemandIdx = prev.barIndex; prevLow = prev.price; }
-
-      bool brokenSupply = false; bool brokenDemand = false;
-      if (lastSupplyIdx != -1) brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
-      if (lastDemandIdx != -1) brokenDemand = CheckForBreakout(lastDemandIdx, p.barIndex, lastDemandLevel, -1);
-
-      if (runningTrend == -1) { if (brokenSupply) runningTrend = 0; }
-      else if (runningTrend == 1) { if (brokenDemand) runningTrend = 0; }
-      else {
-         if (p.type == 1) { if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) { if (!brokenDemand) runningTrend = 1; } }
-         if (p.type == -1) { if (brokenDemand || (prevLow != 0 && p.price < prevLow)) { if (!brokenSupply) runningTrend = -1; } }
-         if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) runningTrend = 1;
-         if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) runningTrend = -1;
-      }
-      ZigZagPoints[i].assignedTrend = runningTrend;
-   }
-   currentMarketTrend = runningTrend;
-}
-
-// ==========================================================
-//    TRADING LOGIC
+//    TRADING LOGIC (V47 Refined)
 // ==========================================================
 void CheckTradeEntry()
 {
    if (!activeSupply.isActive || !activeDemand.isActive) return;
+   
+   // We still prevent opening multiple trades AT ONCE.
+   // But once the trade closes (TP or SL), we are allowed to enter again.
    if (PositionsTotal() > 0) return; 
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
+   // --- BUY LOGIC ---
    if (currentMarketTrend == 1) 
    {
       double zoneHeight = activeDemand.top - activeDemand.bottom;
-      double entryPrice = activeDemand.top - (zoneHeight * EntryZoneDepth); 
       
-      if (ask <= entryPrice && ask >= activeDemand.bottom) 
+      // Calculate the "Sweet Spot" Window
+      double entryPriceStart = activeDemand.top - (zoneHeight * EntryZoneDepth); // 30% deep
+      double entryPriceLimit = activeDemand.top - (zoneHeight * MaxZoneDepth);   // 50% deep
+      
+      // LOGIC: Price must be BELOW the 30% line, but ABOVE the 50% line.
+      // If it goes deeper than 50% (too close to SL), we assume zone is failing -> Don't Buy.
+      if (ask <= entryPriceStart && ask >= entryPriceLimit) 
       {
          double sl = activeDemand.bottom - (SLBufferPoints * _Point);
          double tp = activeSupply.bottom + ((activeSupply.top - activeSupply.bottom) * TPZoneDepth); 
          
-         double risk = entryPrice - sl;
-         double reward = tp - entryPrice;
+         double risk = entryPriceStart - sl; // Conservative R:R calc based on ideal entry
+         double reward = tp - entryPriceStart;
          
-         if (risk > 0 && (reward / risk) >= MinRiskReward) OpenTrade(ORDER_TYPE_BUY, ask, sl, tp);
+         if (risk > 0 && (reward / risk) >= MinRiskReward) {
+            OpenTrade(ORDER_TYPE_BUY, ask, sl, tp);
+         }
       }
    }
+   
+   // --- SELL LOGIC ---
    else if (currentMarketTrend == -1) 
    {
       double zoneHeight = activeSupply.top - activeSupply.bottom;
-      double entryPrice = activeSupply.bottom + (zoneHeight * EntryZoneDepth);
       
-      if (bid >= entryPrice && bid <= activeSupply.top) 
+      // Calculate the "Sweet Spot" Window
+      double entryPriceStart = activeSupply.bottom + (zoneHeight * EntryZoneDepth); // 30% deep
+      double entryPriceLimit = activeSupply.bottom + (zoneHeight * MaxZoneDepth);   // 50% deep
+      
+      // LOGIC: Price must be ABOVE the 30% line, but BELOW the 50% line.
+      if (bid >= entryPriceStart && bid <= entryPriceLimit) 
       {
          double sl = activeSupply.top + (SLBufferPoints * _Point);
          double tp = activeDemand.top - ((activeDemand.top - activeDemand.bottom) * TPZoneDepth);
          
-         double risk = sl - entryPrice;
-         double reward = entryPrice - tp;
+         double risk = sl - entryPriceStart;
+         double reward = entryPriceStart - tp;
          
-         if (risk > 0 && (reward / risk) >= MinRiskReward) OpenTrade(ORDER_TYPE_SELL, bid, sl, tp);
+         if (risk > 0 && (reward / risk) >= MinRiskReward) {
+            OpenTrade(ORDER_TYPE_SELL, bid, sl, tp);
+         }
       }
    }
 }
@@ -325,7 +161,82 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp)
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V45 Auto");
+   trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V47 TripleTap");
+}
+
+// ==========================================================
+//    MAIN ENGINE (Unchanged V45 Logic)
+// ==========================================================
+void UpdateZigZagMap()
+{
+   int totalBars = iBars(_Symbol, _Period);
+   if (totalBars < 500) return;
+
+   PointStruct Alarms[];
+   int alarmCount = 0;
+   int startBar = MathMin(HistoryBars, totalBars - 10);
+   
+   for (int i = startBar; i >= 5; i--) {
+      if (IsGreen(i)) {
+         int c1=i-1; int c2=i-2;
+         if(IsRed(c1)){ if(IsStrongBody(c1)){ if(IsRed(c2)) { ArrayResize(Alarms,alarmCount+1); Alarms[alarmCount].price=iHigh(_Symbol,_Period,i); Alarms[alarmCount].time=iTime(_Symbol,_Period,i); Alarms[alarmCount].type=1; Alarms[alarmCount].barIndex=i; alarmCount++; } }
+         else{ double rl=iLow(_Symbol,_Period,c1); for(int k=1;k<=MaxScanDistance;k++){ int n=c1-k; if(n<0||iHigh(_Symbol,_Period,n)>iHigh(_Symbol,_Period,i))break; if(IsRed(n)&&IsStrongBody(n)&&iClose(_Symbol,_Period,n)<rl){ ArrayResize(Alarms,alarmCount+1); Alarms[alarmCount].price=iHigh(_Symbol,_Period,i); Alarms[alarmCount].time=iTime(_Symbol,_Period,i); Alarms[alarmCount].type=1; Alarms[alarmCount].barIndex=i; alarmCount++; break;} } } }
+      }
+      if (IsRed(i)) {
+         int c1=i-1; int c2=i-2;
+         if(IsGreen(c1)){ if(IsStrongBody(c1)){ if(IsGreen(c2)) { ArrayResize(Alarms,alarmCount+1); Alarms[alarmCount].price=iLow(_Symbol,_Period,i); Alarms[alarmCount].time=iTime(_Symbol,_Period,i); Alarms[alarmCount].type=-1; Alarms[alarmCount].barIndex=i; alarmCount++; } }
+         else{ double rh=iHigh(_Symbol,_Period,c1); for(int k=1;k<=MaxScanDistance;k++){ int n=c1-k; if(n<0||iLow(_Symbol,_Period,n)<iLow(_Symbol,_Period,i))break; if(IsGreen(n)&&IsStrongBody(n)&&iClose(_Symbol,_Period,n)>rh){ ArrayResize(Alarms,alarmCount+1); Alarms[alarmCount].price=iLow(_Symbol,_Period,i); Alarms[alarmCount].time=iTime(_Symbol,_Period,i); Alarms[alarmCount].type=-1; Alarms[alarmCount].barIndex=i; alarmCount++; break;} } } }
+      }
+   }
+   
+   if (alarmCount < 2) return;
+   ArrayResize(ZigZagPoints, 0);
+   int state = 0; PointStruct pendingPoint; int lastCommittedIndex = startBar + 5;
+   if (Alarms[0].type == 1) { AddPoint(ZigZagPoints, Alarms[0]); lastCommittedIndex = Alarms[0].barIndex; state = -1; pendingPoint.price = 999999; } 
+   else { AddPoint(ZigZagPoints, Alarms[0]); lastCommittedIndex = Alarms[0].barIndex; state = 1; pendingPoint.price = 0; }
+   for (int i = 1; i < alarmCount; i++) {
+      int searchStart = Alarms[i].barIndex; int searchEnd = lastCommittedIndex - 1; int count = searchEnd - searchStart + 1; if (count <= 0) continue;
+      if (state == 1) { int hI = iHighest(_Symbol, _Period, MODE_HIGH, count, searchStart); double hP = iHigh(_Symbol, _Period, hI); if (hP > pendingPoint.price) { pendingPoint.price=hP; pendingPoint.time=iTime(_Symbol,_Period,hI); pendingPoint.barIndex=hI; pendingPoint.type=1; } if (Alarms[i].type == -1) { AddPoint(ZigZagPoints, pendingPoint); lastCommittedIndex=pendingPoint.barIndex; state=-1; pendingPoint.price=999999; i--; } }
+      else if (state == -1) { int lI = iLowest(_Symbol, _Period, MODE_LOW, count, searchStart); double lP = iLow(_Symbol, _Period, lI); if (lP < pendingPoint.price) { pendingPoint.price=lP; pendingPoint.time=iTime(_Symbol,_Period,lI); pendingPoint.barIndex=lI; pendingPoint.type=-1; } if (Alarms[i].type == 1) { AddPoint(ZigZagPoints, pendingPoint); lastCommittedIndex=pendingPoint.barIndex; state=1; pendingPoint.price=0; i--; } }
+   }
+   for(int i=0; i<ArraySize(ZigZagPoints); i++) CalculateZoneLimits(ZigZagPoints[i]);
+   CalculateTrendsAndLock();
+   DrawZigZagLines(); 
+   if(DrawZones) DrawParallelZones(); 
+}
+
+// ==========================================================
+//    TREND LOGIC (V42 Momentum)
+// ==========================================================
+void CalculateTrendsAndLock()
+{
+   int count = ArraySize(ZigZagPoints);
+   if (count < 2) return;
+   int runningTrend = 0; 
+   double lastSupplyLevel = 0; int lastSupplyIdx = -1;
+   double lastDemandLevel = 0; int lastDemandIdx = -1;
+   double prevHigh = 0; double prevLow = 0;
+   
+   for (int i = 1; i < count; i++)
+   {
+      PointStruct p = ZigZagPoints[i]; PointStruct prev = ZigZagPoints[i-1];
+      if (prev.type == 1) { lastSupplyLevel = prev.zoneLimitTop; lastSupplyIdx = prev.barIndex; prevHigh = prev.price; }
+      if (prev.type == -1) { lastDemandLevel = prev.zoneLimitBottom; lastDemandIdx = prev.barIndex; prevLow = prev.price; }
+      bool brokenSupply = false; bool brokenDemand = false;
+      if (lastSupplyIdx != -1) brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
+      if (lastDemandIdx != -1) brokenDemand = CheckForBreakout(lastDemandIdx, p.barIndex, lastDemandLevel, -1);
+
+      if (runningTrend == -1) { if (brokenSupply) runningTrend = 0; }
+      else if (runningTrend == 1) { if (brokenDemand) runningTrend = 0; }
+      else {
+         if (p.type == 1) { if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) { if (!brokenDemand) runningTrend = 1; } }
+         if (p.type == -1) { if (brokenDemand || (prevLow != 0 && p.price < prevLow)) { if (!brokenSupply) runningTrend = -1; } }
+         if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) runningTrend = 1;
+         if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) runningTrend = -1;
+      }
+      ZigZagPoints[i].assignedTrend = runningTrend;
+   }
+   currentMarketTrend = runningTrend;
 }
 
 // ==========================================================
