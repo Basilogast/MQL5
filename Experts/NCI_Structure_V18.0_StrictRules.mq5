@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V57.0_Toggle.mq5                           |
+//|         NCI_Structure_V58.0_ProfitLock.mq5                       |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "57.00"
+#property version "58.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -42,10 +42,11 @@ input double BaseMaxDepth      = 0.75;
 input double TPZoneDepth     = 0.0;
 input double SLBufferPoints  = 50;
 
-//--- 6. RISK MANAGEMENT (TOGGLE)
+//--- 6. RISK MANAGEMENT (V58 Profit Locking)
 input group "Risk Management"
-input bool   EnableRiskReduction = false; // SET TO FALSE TO "DO NOTHING"
-input double TriggerPercent      = 0.50;  // Trigger point if enabled
+input bool   EnableProfitLocking = true;  // Turn ON to lock profits
+input double LockTriggerPercent  = 0.80;  // When price hits 80% to TP...
+input double LockPositionPercent = 0.50;  // ...Move SL to 50% of the profit distance.
 
 //--- GLOBALS
 CTrade trade;
@@ -81,26 +82,25 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V57 INIT: Risk Reduction is ", EnableRiskReduction ? "ON (Halving Risk)" : "OFF (Set and Forget)");
+   Print(">>> V58 INIT: Profit Locking Logic Loaded. Trigger: ", LockTriggerPercent*100, "%, Lock: ", LockPositionPercent*100, "%.");
    return INIT_SUCCEEDED;
 }
 
 void OnTick()
 {
    ManageTradeState();       
-   ManageOpenPositions();    // Will simply return if Toggle is False
+   ManageOpenPositions();    
    
    if(IsNewBar()) UpdateZigZagMap();
    if(AllowTrading) CheckTradeEntry();
 }
 
 // ==========================================================
-//    RISK MANAGER (With Toggle)
+//    PROFIT LOCK MANAGER (V58)
 // ==========================================================
 void ManageOpenPositions()
 {
-   // THE TOGGLE: If this is false, we do nothing.
-   if (!EnableRiskReduction) return;
+   if (!EnableProfitLocking) return;
    
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -112,7 +112,8 @@ void ManageOpenPositions()
       long openTime = PositionGetInteger(POSITION_TIME);
       long updateTime = PositionGetInteger(POSITION_TIME_UPDATE);
       
-      if (updateTime > openTime) continue; // Prevent Loops
+      // One-Shot Rule: If SL was moved after open, we assume lock is active.
+      if (updateTime > openTime) continue; 
 
       double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
       double currentSL = PositionGetDouble(POSITION_SL);
@@ -122,42 +123,52 @@ void ManageOpenPositions()
       
       if (currentTP == 0) continue; 
 
+      // --- BUY LOGIC ---
       if (type == POSITION_TYPE_BUY)
       {
          currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double distToTP = currentTP - openPrice; 
-         double currentRisk = openPrice - currentSL; 
+         double totalProfitDist = currentTP - openPrice; // Total potential reward
          
-         if (distToTP <= 0 || currentRisk <= 0) continue;
+         if (totalProfitDist <= 0) continue;
          
-         double triggerPrice = openPrice + (distToTP * TriggerPercent);
+         // 1. Calculate Trigger Price (Entry + 80% of Reward)
+         double triggerPrice = openPrice + (totalProfitDist * LockTriggerPercent);
          
+         // 2. Check if price hit trigger
          if (currentPrice >= triggerPrice)
          {
-             double newSL = openPrice - (currentRisk * 0.5);
+             // 3. Calculate New SL (Entry + 50% of Reward) -> POSITIVE PROFIT
+             double newSL = openPrice + (totalProfitDist * LockPositionPercent);
+             
+             // 4. Move SL (Ensure it's higher than current SL)
              if (newSL > currentSL + _Point)
              {
-                 Print(">>> BUY Risk Halved.");
+                 Print(">>> BUY Profit Lock! Price hit ", LockTriggerPercent*100, "%. Locking ", LockPositionPercent*100, "% Profit.");
                  trade.PositionModify(ticket, newSL, currentTP);
              }
          }
       }
+      // --- SELL LOGIC ---
       else if (type == POSITION_TYPE_SELL)
       {
          currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         double distToTP = openPrice - currentTP;
-         double currentRisk = currentSL - openPrice;
+         double totalProfitDist = openPrice - currentTP; // Total potential reward
          
-         if (distToTP <= 0 || currentRisk <= 0) continue;
+         if (totalProfitDist <= 0) continue;
          
-         double triggerPrice = openPrice - (distToTP * TriggerPercent);
+         // 1. Calculate Trigger Price (Entry - 80% of Reward)
+         double triggerPrice = openPrice - (totalProfitDist * LockTriggerPercent);
          
+         // 2. Check if price hit trigger
          if (currentPrice <= triggerPrice)
          {
-             double newSL = openPrice + (currentRisk * 0.5);
+             // 3. Calculate New SL (Entry - 50% of Reward) -> POSITIVE PROFIT
+             double newSL = openPrice - (totalProfitDist * LockPositionPercent);
+             
+             // 4. Move SL (Ensure it's lower than current SL)
              if (newSL < currentSL - _Point)
              {
-                 Print(">>> SELL Risk Halved.");
+                 Print(">>> SELL Profit Lock! Price hit ", LockTriggerPercent*100, "%. Locking ", LockPositionPercent*100, "% Profit.");
                  trade.PositionModify(ticket, newSL, currentTP);
              }
          }
@@ -166,7 +177,7 @@ void ManageOpenPositions()
 }
 
 // ==========================================================
-//    TRADE STATE MANAGER (Unchanged)
+//    TRADE STATE MANAGER (Handles Zone Burning)
 // ==========================================================
 void ManageTradeState()
 {
@@ -181,12 +192,18 @@ void ManageTradeState()
             totalProfit += (HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION));
          }
          
+         // LOGIC:
+         // If we hit our "Locked Profit" SL, totalProfit will be POSITIVE.
+         // Therefore, this block will execute the 'else' statement.
+         // ZoneIsBurned will be FALSE.
+         // This allows Re-Entry if the price bounces back into the zone.
+         
          if (totalProfit < 0) {
             Print(">>> Trade LOSS ($", DoubleToString(totalProfit, 2), ") on Zone ", TimeToString(CurrentZoneID), ". Zone BURNED.");
             ZoneIsBurned = true; 
          } 
          else {
-            Print(">>> Trade WIN ($", DoubleToString(totalProfit, 2), "). Zone remains ACTIVE.");
+            Print(">>> Trade WIN ($", DoubleToString(totalProfit, 2), "). Zone remains ACTIVE for Re-Entry.");
             ZoneIsBurned = false; 
          }
       }
@@ -289,7 +306,7 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp)
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V57 Toggle")) {
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V58 ProfitLock")) {
       CurrentOpenTicket = trade.ResultOrder(); 
    }
 }
