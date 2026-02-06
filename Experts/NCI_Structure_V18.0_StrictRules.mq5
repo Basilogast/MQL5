@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V50.0_Evolution.mq5                        |
+//|         NCI_Structure_V51.0_InverseScaling.mq5                   |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "50.00"
+#property version "51.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -33,8 +33,10 @@ input group "Trading Logic"
 input bool AllowTrading      = true;
 input double RiskPercent     = 1.0;
 input double MinRiskReward   = 2.0;
-input double EntryZoneDepth  = 0.30; 
-input double MaxZoneDepth    = 0.50; 
+// NEW: Inverse Scaling Settings
+input double ReferenceZonePips = 235.0; // The "Standard" Zone size in pips
+input double BaseEntryDepth    = 0.4; // Target depth for a Standard Zone
+input double BaseMaxDepth      = 0.75; // Max depth for a Standard Zone
 input double TPZoneDepth     = 0.0;
 input double SLBufferPoints  = 50;
 
@@ -55,7 +57,7 @@ struct MergedZoneState {
    bool isActive;
    double top;
    double bottom;
-   datetime startTime; // Unique ID (Updates on Merge)
+   datetime startTime; 
    int lastBarIndex;
 };
 
@@ -74,7 +76,7 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V50 INIT: Dynamic Evolution (Merge Resets Burn Status) Loaded.");
+   Print(">>> V51 INIT: Inverse Scaling Logic (Dynamic Entry Depth) Loaded.");
    return INIT_SUCCEEDED;
 }
 
@@ -86,7 +88,7 @@ void OnTick()
 }
 
 // ==========================================================
-//    TRADE STATE MANAGER (V49 Fix)
+//    TRADE STATE MANAGER (Unchanged)
 // ==========================================================
 void ManageTradeState()
 {
@@ -114,38 +116,55 @@ void ManageTradeState()
 }
 
 // ==========================================================
-//    TRADING LOGIC (V50 - Uses Evolving IDs)
+//    TRADING LOGIC (V51 - INVERSE SCALING)
 // ==========================================================
 void CheckTradeEntry()
 {
    if (!activeSupply.isActive || !activeDemand.isActive) return;
    if (PositionsTotal() > 0) return; 
 
-   // --- ID UPDATE LOGIC ---
-   // If the zone merged, its 'startTime' changed. This creates a NEW ID.
+   // Update ID Logic (V50)
    datetime relevantZoneTime = (currentMarketTrend == 1) ? activeDemand.startTime : activeSupply.startTime;
-   
    if (relevantZoneTime != CurrentZoneID) {
-      // New Identity Detected (either fresh zone OR merged zone)
-      Print(">>> Zone Identity Changed (Merge or New). Resetting Burn Status.");
       CurrentZoneID = relevantZoneTime; 
-      ZoneIsBurned = false; // RESET! Give it another chance.
+      ZoneIsBurned = false; 
    }
-
-   if (ZoneIsBurned) return; // Block only if *current version* of zone is burned
+   if (ZoneIsBurned) return;
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
+   // --- BUY LOGIC ---
    if (currentMarketTrend == 1) 
    {
-      double zoneHeight = activeDemand.top - activeDemand.bottom;
-      double entryPriceStart = activeDemand.top - (zoneHeight * EntryZoneDepth); 
-      double entryPriceLimit = activeDemand.top - (zoneHeight * MaxZoneDepth);   
+      double zoneHeightPrice = activeDemand.top - activeDemand.bottom;
+      double zoneHeightPips = zoneHeightPrice / point;
+      if (zoneHeightPips <= 0) zoneHeightPips = 1; // Prevent DivZero
+      
+      // --- V51 MATH: INVERSE SCALING ---
+      double scalingFactor = ReferenceZonePips / zoneHeightPips;
+      
+      // Calculate Dynamic Percentages
+      double dynamicEntryPct = BaseEntryDepth * scalingFactor;
+      double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
+      
+      // CLAMPS: Keep logic sane
+      // Entry: Min 5% (Big zones), Max 60% (Small zones)
+      if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
+      if (dynamicEntryPct > 0.60) dynamicEntryPct = 0.60;
+      
+      // Max Limit: Min 10%, Max 80%
+      if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
+      if (dynamicMaxPct > 0.80) dynamicMaxPct = 0.80;
+      
+      // Calculate Prices using Dynamic Pct
+      double entryPriceStart = activeDemand.top - (zoneHeightPrice * dynamicEntryPct); 
+      double entryPriceLimit = activeDemand.top - (zoneHeightPrice * dynamicMaxPct);   
       
       if (ask <= entryPriceStart && ask >= entryPriceLimit) 
       {
-         double sl = activeDemand.bottom - (SLBufferPoints * _Point);
+         double sl = activeDemand.bottom - (SLBufferPoints * point);
          double tp = activeSupply.bottom + ((activeSupply.top - activeSupply.bottom) * TPZoneDepth); 
          double risk = entryPriceStart - sl;
          double reward = tp - entryPriceStart;
@@ -153,15 +172,31 @@ void CheckTradeEntry()
          if (risk > 0 && (reward / risk) >= MinRiskReward) OpenTrade(ORDER_TYPE_BUY, ask, sl, tp);
       }
    }
+   // --- SELL LOGIC ---
    else if (currentMarketTrend == -1) 
    {
-      double zoneHeight = activeSupply.top - activeSupply.bottom;
-      double entryPriceStart = activeSupply.bottom + (zoneHeight * EntryZoneDepth); 
-      double entryPriceLimit = activeSupply.bottom + (zoneHeight * MaxZoneDepth);   
+      double zoneHeightPrice = activeSupply.top - activeSupply.bottom;
+      double zoneHeightPips = zoneHeightPrice / point;
+      if (zoneHeightPips <= 0) zoneHeightPips = 1;
+
+      // --- V51 MATH ---
+      double scalingFactor = ReferenceZonePips / zoneHeightPips;
+      
+      double dynamicEntryPct = BaseEntryDepth * scalingFactor;
+      double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
+      
+      // CLAMPS
+      if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
+      if (dynamicEntryPct > 0.60) dynamicEntryPct = 0.60;
+      if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
+      if (dynamicMaxPct > 0.80) dynamicMaxPct = 0.80;
+      
+      double entryPriceStart = activeSupply.bottom + (zoneHeightPrice * dynamicEntryPct); 
+      double entryPriceLimit = activeSupply.bottom + (zoneHeightPrice * dynamicMaxPct);   
       
       if (bid >= entryPriceStart && bid <= entryPriceLimit) 
       {
-         double sl = activeSupply.top + (SLBufferPoints * _Point);
+         double sl = activeSupply.top + (SLBufferPoints * point);
          double tp = activeDemand.top - ((activeDemand.top - activeDemand.bottom) * TPZoneDepth);
          double risk = sl - entryPriceStart;
          double reward = entryPriceStart - tp;
@@ -187,13 +222,13 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp)
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V50 Evolution")) {
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V51 Scaling")) {
       CurrentOpenTicket = trade.ResultOrder(); 
    }
 }
 
 // ==========================================================
-//    DRAWING PARALLEL ZONES (V50 - Draw Before Update)
+//    DRAWING PARALLEL ZONES (Unchanged V50)
 // ==========================================================
 void DrawParallelZones()
 {
@@ -206,65 +241,42 @@ void DrawParallelZones()
    for (int i = 0; i < count; i++)
    {
       PointStruct p = ZigZagPoints[i];
-      
-      // --- SUPPLY ---
       if (p.type == 1) {
          if (!supply.isActive) StartZone(supply, p);
          else {
             bool isBroken = CheckForBreakout(supply.lastBarIndex, p.barIndex, supply.top, 1);
-            if (isBroken) { 
-               DrawSingleZone(supply.startTime, p.time, supply.top, supply.bottom, 1, i-1); 
-               StartZone(supply, p); 
-            }
+            if (isBroken) { DrawSingleZone(supply.startTime, p.time, supply.top, supply.bottom, 1, i-1); StartZone(supply, p); }
             else {
-               // NOT BROKEN: MERGE LOGIC
-               // Whether Fakeout or Overlap, if we merge, we Update Identity.
-               
-               // Check condition for merge first:
                bool shouldMerge = false;
-               if (p.zoneLimitTop > supply.top) shouldMerge = true; // Fakeout
+               if (p.zoneLimitTop > supply.top) shouldMerge = true; 
                else {
                   bool isOverlapping = (MathMax(supply.bottom, p.zoneLimitBottom) <= MathMin(supply.top, p.zoneLimitTop));
                   if (isOverlapping) shouldMerge = true;
                }
-
                if (shouldMerge) {
-                  // 1. VISUAL: Draw the 'Old' Zone up to this point (Close the chapter)
                   DrawSingleZone(supply.startTime, p.time, supply.top, supply.bottom, 1, i-1);
-                  
-                  // 2. DATA: Merge & Update StartTime (New Identity)
                   MergeZone(supply, p, 1);
                } else {
-                  // Step Down (No overlap)
                   DrawSingleZone(supply.startTime, p.time, supply.top, supply.bottom, 1, i-1); 
                   StartZone(supply, p); 
                }
             }
          }
       }
-      
-      // --- DEMAND ---
       else if (p.type == -1) {
          if (!demand.isActive) StartZone(demand, p);
          else {
             bool isBroken = CheckForBreakout(demand.lastBarIndex, p.barIndex, demand.bottom, -1);
-            if (isBroken) { 
-               DrawSingleZone(demand.startTime, p.time, demand.top, demand.bottom, -1, i-1); 
-               StartZone(demand, p); 
-            }
+            if (isBroken) { DrawSingleZone(demand.startTime, p.time, demand.top, demand.bottom, -1, i-1); StartZone(demand, p); }
             else {
-               // Merge Logic
                bool shouldMerge = false;
-               if (p.zoneLimitBottom < demand.bottom) shouldMerge = true; // Fakeout
+               if (p.zoneLimitBottom < demand.bottom) shouldMerge = true; 
                else {
                   bool isOverlapping = (MathMax(demand.bottom, p.zoneLimitBottom) <= MathMin(demand.top, p.zoneLimitTop));
                   if (isOverlapping) shouldMerge = true;
                }
-
                if (shouldMerge) {
-                  // 1. Draw Old
                   DrawSingleZone(demand.startTime, p.time, demand.top, demand.bottom, -1, i-1);
-                  // 2. Update Identity
                   MergeZone(demand, p, -1);
                } else {
                   DrawSingleZone(demand.startTime, p.time, demand.top, demand.bottom, -1, i-1); 
@@ -276,29 +288,13 @@ void DrawParallelZones()
    }
    if (supply.isActive) DrawSingleZone(supply.startTime, TimeCurrent()+PeriodSeconds()*50, supply.top, supply.bottom, 1, 999991);
    if (demand.isActive) DrawSingleZone(demand.startTime, TimeCurrent()+PeriodSeconds()*50, demand.top, demand.bottom, -1, 999992);
-   
    activeSupply = supply;
    activeDemand = demand;
    ChartRedraw();
 }
 
-// ==========================================================
-//    CORE HELPERS (V50 Modified Merge)
-// ==========================================================
-void MergeZone(MergedZoneState &state, PointStruct &p, int type) { 
-   if (type == 1) { 
-      state.top = MathMax(state.top, p.zoneLimitTop); 
-      state.bottom = MathMin(state.bottom, p.zoneLimitBottom); 
-   } else { 
-      state.bottom = MathMin(state.bottom, p.zoneLimitBottom); 
-      state.top = MathMax(state.top, p.zoneLimitTop); 
-   } 
-   
-   // KEY V50 CHANGE: Update Identity
-   state.startTime = p.time; // This resets the "Burn" timer
-   state.lastBarIndex = p.barIndex; 
-}
-
+// --- HELPERS (Unchanged V50) ---
+void MergeZone(MergedZoneState &state, PointStruct &p, int type) { if (type == 1) { state.top = MathMax(state.top, p.zoneLimitTop); state.bottom = MathMin(state.bottom, p.zoneLimitBottom); } else { state.bottom = MathMin(state.bottom, p.zoneLimitBottom); state.top = MathMax(state.top, p.zoneLimitTop); } state.startTime = p.time; state.lastBarIndex = p.barIndex; }
 void StartZone(MergedZoneState &state, PointStruct &p) { state.isActive=true; state.top=p.zoneLimitTop; state.bottom=p.zoneLimitBottom; state.startTime=p.time; state.lastBarIndex=p.barIndex; }
 void DrawSingleZone(datetime t1, datetime t2, double top, double bottom, int type, int id) { if (top <= bottom) return; string name = "NCI_Zone_M_" + IntegerToString(id) + "_" + TimeToString(t1); color c = (type == 1) ? SupplyColor : DemandColor; if(ObjectFind(0,name)<0) { ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bottom); ObjectSetInteger(0, name, OBJPROP_COLOR, c); ObjectSetInteger(0, name, OBJPROP_FILL, true); ObjectSetInteger(0, name, OBJPROP_BACK, true); ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); } }
 
