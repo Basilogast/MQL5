@@ -56,7 +56,7 @@ input double MaxBufferPoints  = 200;
 input group "Risk Management"
 input bool   EnableProfitLocking = true;
 input double LockTriggerPercent  = 0.80;  
-input double LockPositionPercent = 0.50;  
+input double LockPositionPercent = 0.70;  
 
 //--- GLOBALS
 CTrade trade;
