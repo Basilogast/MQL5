@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V76.0_TradersMindset.mq5                   |
+//|         NCI_Structure_V78.2_Fixed.mq5                            |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "76.00"
+#property version "78.21"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -180,7 +180,7 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V76.0 INIT: Trader's Mindset (Anchored Merge) Active.");
+   Print(">>> V78.2 INIT: Synced Brains (Trend + Zones) Active.");
    return INIT_SUCCEEDED;
 }
 
@@ -232,7 +232,6 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
    
    if (ZoneIsBurned) return; 
 
-   // --- 3-MODE RE-ENTRY LOGIC ---
    double tradeRisk = RiskPercent;
 
    if (EntryMode == MODE_SINGLE) 
@@ -251,7 +250,6 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
       tradeRisk = RiskPercent; 
    }
 
-   // --- VOLATILITY GUARD ---
    if (UseVolatilityGuard)
    {
        if (!CheckVolatility()) return; 
@@ -274,7 +272,6 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
    if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
    if (dynamicMaxPct > 0.80) dynamicMaxPct = 0.80;
 
-   // BUFFER CALCULATION
    double finalBuffer = BaseBufferPoints; 
    if (UseDynamicBuffer) 
    {
@@ -319,7 +316,6 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
    }
 }
 
-// Volatility Checker
 bool CheckVolatility() 
 {
    int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -350,7 +346,7 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V76.0 " + comment)) {
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V78.2 " + comment)) {
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
    }
@@ -415,7 +411,7 @@ void ManageTradeState() {
 }
 
 // ==========================================================
-//    ZONE DRAWING
+// V78.2: FIXED ZONE PAINTER (SYNCED WITH TREND LOGIC)
 // ==========================================================
 void DrawParallelZones() { 
    ObjectsDeleteAll(0, "NCI_Zone_");
@@ -435,7 +431,9 @@ void DrawParallelZones() {
       if (p.type == 1) { 
          if (!supply.isActive) StartZone(supply, p); 
          else { 
-            bool isBroken = CheckForBreakout(supply.lastBarIndex, p.barIndex, supply.top, 1); 
+            bool isBroken = CheckForBreakout(supply.lastBarIndex, p.barIndex, supply.top, 1);
+            if (p.price > supply.top) isBroken = true; // *** V78.2 FIX: Manual Destination Check ***
+
             if (isBroken) { 
                DrawSingleZone(supply.startTime, p.time, supply.top, supply.bottom, 1, i-1); 
                
@@ -478,7 +476,9 @@ void DrawParallelZones() {
       else if (p.type == -1) { 
          if (!demand.isActive) StartZone(demand, p); 
          else { 
-            bool isBroken = CheckForBreakout(demand.lastBarIndex, p.barIndex, demand.bottom, -1); 
+            bool isBroken = CheckForBreakout(demand.lastBarIndex, p.barIndex, demand.bottom, -1);
+            if (p.price < demand.bottom) isBroken = true; // *** V78.2 FIX: Manual Destination Check ***
+
             if (isBroken) { 
                DrawSingleZone(demand.startTime, p.time, demand.top, demand.bottom, -1, i-1); 
                
@@ -528,6 +528,66 @@ void DrawParallelZones() {
    ChartRedraw(); 
 }
 
+// ==========================================================
+// V78.0: BLIND SPOT FIX (MANUAL CHECK IN TREND LOGIC)
+// ==========================================================
+void CalculateTrendsAndLock() { 
+   int count = ArraySize(ZigZagPoints); 
+   if (count < 2) return; 
+   int runningTrend = 0; 
+   double lastSupplyLevel = 0; int lastSupplyIdx = -1; 
+   double lastDemandLevel = 0; int lastDemandIdx = -1; 
+   double prevHigh = 0; double prevLow = 0; 
+   for (int i = 1; i < count; i++) { 
+      PointStruct p = ZigZagPoints[i]; 
+      PointStruct prev = ZigZagPoints[i-1]; 
+      if (prev.type == 1) { lastSupplyLevel = prev.zoneLimitTop; lastSupplyIdx = prev.barIndex; prevHigh = prev.price; } 
+      if (prev.type == -1) { lastDemandLevel = prev.zoneLimitBottom; lastDemandIdx = prev.barIndex; prevLow = prev.price; } 
+      
+      bool brokenSupply = false; bool brokenDemand = false; 
+      
+      // V78.0 LOGIC: Syncs Trend Line with the same manual check
+      if (lastSupplyIdx != -1) {
+          brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
+          if (p.price > lastSupplyLevel) brokenSupply = true; 
+      }
+      
+      if (lastDemandIdx != -1) {
+          brokenDemand = CheckForBreakout(lastDemandIdx, p.barIndex, lastDemandLevel, -1);
+          if (p.price < lastDemandLevel) brokenDemand = true; 
+      }
+
+      if (runningTrend == -1) { if (brokenSupply) runningTrend = 0; } 
+      else if (runningTrend == 1) { if (brokenDemand) runningTrend = 0; } 
+      else { 
+         if (p.type == 1) { if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) { if (!brokenDemand) runningTrend = 1; } } 
+         if (p.type == -1) { if (brokenDemand || (prevLow != 0 && p.price < prevLow)) { if (!brokenSupply) runningTrend = -1; } } 
+         if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) runningTrend = 1; 
+         if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) runningTrend = -1; 
+      } 
+      ZigZagPoints[i].assignedTrend = runningTrend; 
+   } 
+   currentMarketTrend = runningTrend; 
+}
+
+// *** REVERTED: Loop uses '> ' (not '>=') ***
+// This blindly skips the destination candle.
+bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) { 
+   for (int i = startBarIdx - 1; i > endBarIdx; i--) { 
+      if (i-1 < 0) return false; 
+      if (type == 1) { 
+         double c1 = GetClose(i); 
+         double c2 = GetClose(i-1); 
+         if (c1 > level && c2 > level && c2 > c1) return true; 
+      } else { 
+         double c1 = GetClose(i); 
+         double c2 = GetClose(i-1); 
+         if (c1 < level && c2 < level && c2 < c1) return true; 
+      } 
+   } 
+   return false; 
+}
+
 double FindNextTarget(int currentIndex, int targetType)
 {
    int total = ArraySize(ZigZagPoints);
@@ -573,35 +633,16 @@ void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
 }
 
 // ==========================================================
-// NEW: "Trader's Mindset" Merging Logic
-// Principle: Anchor the Stop Loss for safety, but update the 
-//            Entry level based on the most recent price action.
+// V76: TRADER'S MINDSET MERGING (Anchored SL)
 // ==========================================================
 void MergeZone(MergedZoneState &state, PointStruct &p, int type) { 
-   if (type == 1) { // SUPPLY ZONE
-      // 1. ANCHOR THE STOP LOSS (Top of Zone)
-      // We take the highest high ever seen in this structure. 
-      // This ensures the SL never moves down, keeping it safe.
-      state.top = MathMax(state.top, p.price); 
-      
-      // 2. UPDATE THE ENTRY (Bottom of Zone)
-      // We set the entry to the *most recent* point's calculated entry level.
-      // If the recent price action is tighter, the zone's entry will tighten.
-      state.bottom = p.zoneLimitBottom;
-
-   } else { // DEMAND ZONE
-      // 1. ANCHOR THE STOP LOSS (Bottom of Zone)
-      // We take the lowest low ever seen in this structure.
-      // This ensures the SL never moves up.
-      state.bottom = MathMin(state.bottom, p.price);
-
-      // 2. UPDATE THE ENTRY (Top of Zone)
-      // We set the entry to the *most recent* point's calculated entry level.
-      // This allows the zone to tighten based on new information.
-      state.top = p.zoneLimitTop;
+   if (type == 1) { // SUPPLY
+      state.top = MathMax(state.top, p.price); // Anchor SL
+      state.bottom = p.zoneLimitBottom;        // Update Entry
+   } else { // DEMAND
+      state.bottom = MathMin(state.bottom, p.price); // Anchor SL
+      state.top = p.zoneLimitTop;                    // Update Entry
    } 
-   
-   // Mark the zone's time as updated
    state.startTime = p.time; 
    state.lastBarIndex = p.barIndex; 
 }
@@ -627,6 +668,9 @@ void DrawSingleZone(datetime t1, datetime t2, double top, double bottom, int typ
    } 
 }
 
+// ==========================================================
+// V77: FLEXIBLE BREAKOUT LOGIC
+// ==========================================================
 void UpdateZigZagMap() { 
    int totalBars = Bars(_Symbol, _Period); 
    if (totalBars < 500) return; 
@@ -634,11 +678,18 @@ void UpdateZigZagMap() {
    int alarmCount = 0; 
    int startBar = MathMin(HistoryBars, totalBars - 10); 
    for (int i = startBar; i >= 5; i--) { 
+      
+      // SUPPLY CHECK
       if (IsGreen(i)) { 
          int c1=i-1; int c2=i-2; 
          if(IsRed(c1)){ 
             if(IsStrongBody(c1)){ 
-               if(IsRed(c2)) { 
+               // NEW V77 LOGIC: Same Color OR Different Color but closed Below Zone
+               bool confirm = false;
+               if(IsRed(c2)) confirm = true;
+               else if(GetClose(c2) < GetOpen(i)) confirm = true; 
+
+               if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
                   Alarms[alarmCount].price=GetHigh(i); 
                   Alarms[alarmCount].time=GetTime(i); 
@@ -646,7 +697,7 @@ void UpdateZigZagMap() {
                   Alarms[alarmCount].barIndex=i; 
                   alarmCount++; 
                } 
-            } else{ 
+            } else { 
                double rl=GetLow(c1); 
                for(int k=1;k<=MaxScanDistance;k++){ 
                   int n=c1-k; 
@@ -664,11 +715,18 @@ void UpdateZigZagMap() {
             } 
          } 
       } 
+      
+      // DEMAND CHECK
       if (IsRed(i)) { 
          int c1=i-1; int c2=i-2; 
          if(IsGreen(c1)){ 
             if(IsStrongBody(c1)){ 
-               if(IsGreen(c2)) { 
+               // NEW V77 LOGIC: Same Color OR Different Color but closed Above Zone
+               bool confirm = false;
+               if(IsGreen(c2)) confirm = true;
+               else if(GetClose(c2) > GetOpen(i)) confirm = true;
+
+               if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
                   Alarms[alarmCount].price=GetLow(i); 
                   Alarms[alarmCount].time=GetTime(i); 
@@ -676,7 +734,7 @@ void UpdateZigZagMap() {
                   Alarms[alarmCount].barIndex=i; 
                   alarmCount++; 
                } 
-            } else{ 
+            } else { 
                double rh=GetHigh(c1); 
                for(int k=1;k<=MaxScanDistance;k++){ 
                   int n=c1-k; 
@@ -754,50 +812,6 @@ void UpdateZigZagMap() {
    CalculateTrendsAndLock(); 
    DrawZigZagLines(); 
    if(DrawZones) DrawParallelZones(); 
-}
-
-void CalculateTrendsAndLock() { 
-   int count = ArraySize(ZigZagPoints); 
-   if (count < 2) return; 
-   int runningTrend = 0; 
-   double lastSupplyLevel = 0; int lastSupplyIdx = -1; 
-   double lastDemandLevel = 0; int lastDemandIdx = -1; 
-   double prevHigh = 0; double prevLow = 0; 
-   for (int i = 1; i < count; i++) { 
-      PointStruct p = ZigZagPoints[i]; 
-      PointStruct prev = ZigZagPoints[i-1]; 
-      if (prev.type == 1) { lastSupplyLevel = prev.zoneLimitTop; lastSupplyIdx = prev.barIndex; prevHigh = prev.price; } 
-      if (prev.type == -1) { lastDemandLevel = prev.zoneLimitBottom; lastDemandIdx = prev.barIndex; prevLow = prev.price; } 
-      bool brokenSupply = false; bool brokenDemand = false; 
-      if (lastSupplyIdx != -1) brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1); 
-      if (lastDemandIdx != -1) brokenDemand = CheckForBreakout(lastDemandIdx, p.barIndex, lastDemandLevel, -1); 
-      if (runningTrend == -1) { if (brokenSupply) runningTrend = 0; } 
-      else if (runningTrend == 1) { if (brokenDemand) runningTrend = 0; } 
-      else { 
-         if (p.type == 1) { if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) { if (!brokenDemand) runningTrend = 1; } } 
-         if (p.type == -1) { if (brokenDemand || (prevLow != 0 && p.price < prevLow)) { if (!brokenSupply) runningTrend = -1; } } 
-         if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) runningTrend = 1; 
-         if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) runningTrend = -1; 
-      } 
-      ZigZagPoints[i].assignedTrend = runningTrend; 
-   } 
-   currentMarketTrend = runningTrend; 
-}
-
-bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) { 
-   for (int i = startBarIdx - 1; i > endBarIdx; i--) { 
-      if (i-1 < 0) return false; 
-      if (type == 1) { 
-         double c1 = GetClose(i); 
-         double c2 = GetClose(i-1); 
-         if (c1 > level && c2 > level && c2 > c1) return true; 
-      } else { 
-         double c1 = GetClose(i); 
-         double c2 = GetClose(i-1); 
-         if (c1 < level && c2 < level && c2 < c1) return true; 
-      } 
-   } 
-   return false; 
 }
 
 void CalculateZoneLimits(PointStruct &p) { 
