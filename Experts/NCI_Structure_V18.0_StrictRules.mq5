@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V75.2_DoubleEntryDefault.mq5               |
+//|         NCI_Structure_V76.0_TradersMindset.mq5                   |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "75.20"
+#property version "76.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -11,7 +11,7 @@
 // --- ENUMS ---
 enum ENUM_REENTRY_MODE {
    MODE_SINGLE   = 0, // One Trade Only (Conservative)
-   MODE_DOUBLE   = 1, // Two Trades (1st @ 1.0%, 2nd @ 0.5%) - BEST BALANCE
+   MODE_DOUBLE   = 1, // Two Trades (1st @ 1.0%, 2nd @ 0.5%) - DEFAULT
    MODE_INFINITE = 2  // Infinite Trades (Aggressive)
 };
 
@@ -180,7 +180,7 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V75.2 INIT: Double-Entry Default Mode Active.");
+   Print(">>> V76.0 INIT: Trader's Mindset (Anchored Merge) Active.");
    return INIT_SUCCEEDED;
 }
 
@@ -350,7 +350,7 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V75.2 " + comment)) {
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V76.0 " + comment)) {
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
    }
@@ -572,16 +572,36 @@ void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
    }
 }
 
-// ... (STANDARD HELPERS) ...
-
+// ==========================================================
+// NEW: "Trader's Mindset" Merging Logic
+// Principle: Anchor the Stop Loss for safety, but update the 
+//            Entry level based on the most recent price action.
+// ==========================================================
 void MergeZone(MergedZoneState &state, PointStruct &p, int type) { 
-   if (type == 1) { 
-      state.top = MathMax(state.top, p.zoneLimitTop); 
-      state.bottom = MathMin(state.bottom, p.zoneLimitBottom); 
-   } else { 
-      state.bottom = MathMin(state.bottom, p.zoneLimitBottom); 
-      state.top = MathMax(state.top, p.zoneLimitTop); 
+   if (type == 1) { // SUPPLY ZONE
+      // 1. ANCHOR THE STOP LOSS (Top of Zone)
+      // We take the highest high ever seen in this structure. 
+      // This ensures the SL never moves down, keeping it safe.
+      state.top = MathMax(state.top, p.price); 
+      
+      // 2. UPDATE THE ENTRY (Bottom of Zone)
+      // We set the entry to the *most recent* point's calculated entry level.
+      // If the recent price action is tighter, the zone's entry will tighten.
+      state.bottom = p.zoneLimitBottom;
+
+   } else { // DEMAND ZONE
+      // 1. ANCHOR THE STOP LOSS (Bottom of Zone)
+      // We take the lowest low ever seen in this structure.
+      // This ensures the SL never moves up.
+      state.bottom = MathMin(state.bottom, p.price);
+
+      // 2. UPDATE THE ENTRY (Top of Zone)
+      // We set the entry to the *most recent* point's calculated entry level.
+      // This allows the zone to tighten based on new information.
+      state.top = p.zoneLimitTop;
    } 
+   
+   // Mark the zone's time as updated
    state.startTime = p.time; 
    state.lastBarIndex = p.barIndex; 
 }
