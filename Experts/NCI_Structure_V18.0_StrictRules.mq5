@@ -1,12 +1,19 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V74.0_Modular.mq5                          |
+//|         NCI_Structure_V75.2_DoubleEntryDefault.mq5               |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "74.00"
+#property version "75.20"
 #property strict
 
 #include <Trade\Trade.mqh>
+
+// --- ENUMS ---
+enum ENUM_REENTRY_MODE {
+   MODE_SINGLE   = 0, // One Trade Only (Conservative)
+   MODE_DOUBLE   = 1, // Two Trades (1st @ 1.0%, 2nd @ 0.5%) - BEST BALANCE
+   MODE_INFINITE = 2  // Infinite Trades (Aggressive)
+};
 
 //--- 1. VISUAL SETTINGS
 input group "Visual Settings"
@@ -38,15 +45,15 @@ input bool AllowBreakoutEntry = true;
 input double RiskPercent     = 1.0;  
 input double MinRiskReward   = 2.0;  
 
-// NEW: Volatility Guard Switch
-input group "Volatility Guard"
-input bool   UseVolatilityGuard = true; // [TRUE = Protect] [FALSE = Ignore]
-input int    MaxSpreadPoints   = 30; 
-input int    MaxCandleSizePips = 80; 
-
-// NEW: Second Chance Switch
+// NEW: Re-Entry Mode (Default set to DOUBLE)
 input group "Re-Entry Logic"
-input bool   UseSecondChance   = true;  // [TRUE = Allow 2nd Trade] [FALSE = One & Done]
+input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE; 
+
+// NEW: Volatility Guard
+input group "Volatility Guard"
+input bool   UseVolatilityGuard = true; 
+input int    MaxSpreadPoints   = 30; 
+input int    MaxCandleSizePips = 80; // Optimized
 
 //--- 5. SCALING & ENTRY
 input group "Entry Logic"
@@ -173,7 +180,7 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V74.0 INIT: Volatility & Second Chance Switches Added.");
+   Print(">>> V75.2 INIT: Double-Entry Default Mode Active.");
    return INIT_SUCCEEDED;
 }
 
@@ -225,24 +232,26 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
    
    if (ZoneIsBurned) return; 
 
-   // --- SECOND CHANCE LOGIC (Switchable) ---
+   // --- 3-MODE RE-ENTRY LOGIC ---
    double tradeRisk = RiskPercent;
 
-   if (UseSecondChance) 
+   if (EntryMode == MODE_SINGLE) 
    {
-       // Active: Allow 2nd trade
-       if (CurrentZoneTradeCount == 0) tradeRisk = RiskPercent;      
-       else if (CurrentZoneTradeCount == 1) tradeRisk = RiskPercent * 0.5; 
-       else return; // 3rd Trade Blocked
+      if (CurrentZoneTradeCount > 0) return; 
+      tradeRisk = RiskPercent;
    }
-   else 
+   else if (EntryMode == MODE_DOUBLE) 
    {
-       // Inactive: One trade only
-       if (CurrentZoneTradeCount > 0) return; 
-       tradeRisk = RiskPercent;
+      if (CurrentZoneTradeCount == 0) tradeRisk = RiskPercent;
+      else if (CurrentZoneTradeCount == 1) tradeRisk = RiskPercent * 0.5;
+      else return; 
+   }
+   else if (EntryMode == MODE_INFINITE) 
+   {
+      tradeRisk = RiskPercent; 
    }
 
-   // --- VOLATILITY GUARD (Switchable) ---
+   // --- VOLATILITY GUARD ---
    if (UseVolatilityGuard)
    {
        if (!CheckVolatility()) return; 
@@ -341,7 +350,7 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V74 " + comment)) {
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V75.2 " + comment)) {
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
    }
