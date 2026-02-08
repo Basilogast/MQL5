@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V72.0_BufferSwitch.mq5                     |
+//|         NCI_Structure_V74.0_Modular.mq5                          |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "72.00"
+#property version "74.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -35,8 +35,18 @@ input group "Trading Logic"
 input bool AllowTrading      = true;
 input bool AllowTrendEntry    = true; 
 input bool AllowBreakoutEntry = true; 
-input double RiskPercent     = 1.0;
-input double MinRiskReward   = 2;
+input double RiskPercent     = 1.0;  
+input double MinRiskReward   = 2.0;  
+
+// NEW: Volatility Guard Switch
+input group "Volatility Guard"
+input bool   UseVolatilityGuard = true; // [TRUE = Protect] [FALSE = Ignore]
+input int    MaxSpreadPoints   = 30; 
+input int    MaxCandleSizePips = 80; 
+
+// NEW: Second Chance Switch
+input group "Re-Entry Logic"
+input bool   UseSecondChance   = true;  // [TRUE = Allow 2nd Trade] [FALSE = One & Done]
 
 //--- 5. SCALING & ENTRY
 input group "Entry Logic"
@@ -47,16 +57,16 @@ input double TPZoneDepth     = 0.0;
 
 //--- 6. BUFFER SETTINGS
 input group "Buffer Logic"
-input bool   UseDynamicBuffer = false; // [TRUE = Smart Scaling] [FALSE = Fixed 50 Points]
-input double BaseBufferPoints = 45;   // Used as Base for Dynamic, or Fixed Value if Dynamic is OFF
+input bool   UseDynamicBuffer = false; 
+input double BaseBufferPoints = 45.0;  
 input double MinBufferPoints  = 20;   
 input double MaxBufferPoints  = 200;  
 
 //--- 7. RISK MANAGEMENT
 input group "Risk Management"
 input bool   EnableProfitLocking = true;
-input double LockTriggerPercent  = 0.80;  
-input double LockPositionPercent = 0.70;  
+input double LockTriggerPercent  = 0.80; 
+input double LockPositionPercent = 0.70; 
 
 //--- GLOBALS
 CTrade trade;
@@ -88,6 +98,7 @@ MergedZoneState activeFlippedDemand;
 int currentMarketTrend = 0;
 ulong CurrentOpenTicket = 0;   
 datetime CurrentZoneID = 0;
+int CurrentZoneTradeCount = 0; 
 bool ZoneIsBurned = false;    
 
 // ==========================================================
@@ -104,7 +115,7 @@ void ManageOpenPositions();
 void UpdateZigZagMap();
 void CheckTradeEntry();
 void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout);
-void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment);
+void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent);
 void DrawParallelZones();
 double FindNextTarget(int currentIndex, int targetType);
 datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel);
@@ -122,6 +133,7 @@ bool IsStrongBody(int index);
 bool IsGreen(int index);
 bool IsRed(int index);
 bool IsNewBar();
+bool CheckVolatility(); 
 
 // ==========================================================
 //    CUSTOM WRAPPERS
@@ -161,7 +173,7 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V72.0 INIT: Buffer Switch Added. Dynamic=", UseDynamicBuffer);
+   Print(">>> V74.0 INIT: Volatility & Second Chance Switches Added.");
    return INIT_SUCCEEDED;
 }
 
@@ -207,9 +219,34 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
    datetime relevantTime = zone.startTime;
    if (relevantTime != CurrentZoneID) {
       CurrentZoneID = relevantTime; 
-      ZoneIsBurned = false;
+      ZoneIsBurned = false;        
+      CurrentZoneTradeCount = 0;   
    }
-   if (ZoneIsBurned) return;
+   
+   if (ZoneIsBurned) return; 
+
+   // --- SECOND CHANCE LOGIC (Switchable) ---
+   double tradeRisk = RiskPercent;
+
+   if (UseSecondChance) 
+   {
+       // Active: Allow 2nd trade
+       if (CurrentZoneTradeCount == 0) tradeRisk = RiskPercent;      
+       else if (CurrentZoneTradeCount == 1) tradeRisk = RiskPercent * 0.5; 
+       else return; // 3rd Trade Blocked
+   }
+   else 
+   {
+       // Inactive: One trade only
+       if (CurrentZoneTradeCount > 0) return; 
+       tradeRisk = RiskPercent;
+   }
+
+   // --- VOLATILITY GUARD (Switchable) ---
+   if (UseVolatilityGuard)
+   {
+       if (!CheckVolatility()) return; 
+   }
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -219,7 +256,6 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
    double zoneHeightPips = zoneHeightPrice / point;
    if (zoneHeightPips <= 0) zoneHeightPips = 1; 
    
-   // --- DYNAMIC ENTRY DEPTH CALCULATION (Always Active) ---
    double scalingFactor = ReferenceZonePips / zoneHeightPips;
    double dynamicEntryPct = BaseEntryDepth * scalingFactor;
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
@@ -229,17 +265,14 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
    if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
    if (dynamicMaxPct > 0.80) dynamicMaxPct = 0.80;
 
-   // --- BUFFER CALCULATION (Switchable) ---
-   double finalBuffer = BaseBufferPoints; // Default to Fixed
-
+   // BUFFER CALCULATION
+   double finalBuffer = BaseBufferPoints; 
    if (UseDynamicBuffer) 
    {
-      // V71 Logic: Scale by Size * Entry Depth
       finalBuffer = BaseBufferPoints * scalingFactor * (1.0 + dynamicEntryPct);
       if (finalBuffer < MinBufferPoints) finalBuffer = MinBufferPoints;
       if (finalBuffer > MaxBufferPoints) finalBuffer = MaxBufferPoints;
    }
-   // Else: finalBuffer remains = BaseBufferPoints (Fixed 50)
 
    if (type == 1) // Buy
    {
@@ -249,13 +282,12 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
       if (ask <= entryPriceStart && ask >= entryPriceLimit) 
       {
          double sl = zone.bottom - (finalBuffer * point);
-         
          double tp = activeSupply.bottom + ((activeSupply.top - activeSupply.bottom) * TPZoneDepth); 
          double risk = entryPriceStart - sl; 
          double reward = tp - entryPriceStart;
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, isBreakout ? "Breakout" : "Standard");
+            OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, isBreakout ? "Breakout" : "Standard", tradeRisk);
          }
       }
    }
@@ -267,22 +299,37 @@ void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout)
       if (bid >= entryPriceStart && bid <= entryPriceLimit) 
       {
          double sl = zone.top + (finalBuffer * point);
-
          double tp = activeDemand.top - ((activeDemand.top - activeDemand.bottom) * TPZoneDepth);
          double risk = sl - entryPriceStart;
          double reward = entryPriceStart - tp;
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, isBreakout ? "Breakout" : "Standard");
+            OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, isBreakout ? "Breakout" : "Standard", tradeRisk);
          }
       }
    }
 }
 
-void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment)
+// Volatility Checker
+bool CheckVolatility() 
+{
+   int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if (spread > MaxSpreadPoints) return false;
+
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double size0 = (GetHigh(0) - GetLow(0)) / point / 10.0; 
+   double size1 = (GetHigh(1) - GetLow(1)) / point / 10.0; 
+   
+   if (size0 > MaxCandleSizePips) return false;
+   if (size1 > MaxCandleSizePips) return false;
+   
+   return true;
+}
+
+void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskAmount = balance * (RiskPercent / 100.0);
+   double riskAmount = balance * (finalRiskPercent / 100.0); 
    double riskPoints = MathAbs(price - sl) / _Point; 
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    
@@ -294,8 +341,9 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V72 " + comment)) {
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V74 " + comment)) {
       CurrentOpenTicket = trade.ResultOrder();
+      CurrentZoneTradeCount++; 
    }
 }
 
@@ -349,7 +397,7 @@ void ManageTradeState() {
             Print(">>> Trade LOSS on Zone ", TimeToString(CurrentZoneID), ". Zone BURNED."); 
             ZoneIsBurned = true; 
          } else { 
-            Print(">>> Trade WIN. Zone remains ACTIVE."); 
+            Print(">>> Trade WIN. Zone remains ACTIVE for Re-Entry (Count: ", CurrentZoneTradeCount, ")"); 
             ZoneIsBurned = false; 
          } 
       } 
