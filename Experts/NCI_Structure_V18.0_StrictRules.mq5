@@ -36,7 +36,7 @@ input bool AllowTrading      = true;
 input bool AllowTrendEntry    = true; 
 input bool AllowBreakoutEntry = true; 
 input double RiskPercent     = 1.0;
-input double MinRiskReward   = 2.0;
+input double MinRiskReward   = 2;
 
 //--- 5. SCALING & ENTRY
 input group "Entry Logic"
@@ -48,7 +48,7 @@ input double TPZoneDepth     = 0.0;
 //--- 6. BUFFER SETTINGS
 input group "Buffer Logic"
 input bool   UseDynamicBuffer = false; // [TRUE = Smart Scaling] [FALSE = Fixed 50 Points]
-input double BaseBufferPoints = 50;   // Used as Base for Dynamic, or Fixed Value if Dynamic is OFF
+input double BaseBufferPoints = 45;   // Used as Base for Dynamic, or Fixed Value if Dynamic is OFF
 input double MinBufferPoints  = 20;   
 input double MaxBufferPoints  = 200;  
 
