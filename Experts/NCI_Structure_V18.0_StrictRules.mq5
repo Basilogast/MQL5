@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|         NCI_Structure_V78.2_Fixed.mq5                            |
+//|         NCI_Structure_V78.7_CompleteLogic.mq5                    |
 //|                                  Copyright 2024, NCI Strategy    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version "78.21"
+#property version "78.70"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -109,29 +109,38 @@ int CurrentZoneTradeCount = 0;
 bool ZoneIsBurned = false;    
 
 // ==========================================================
-//    FORWARD DECLARATIONS
+//    FORWARD DECLARATIONS (MANIFEST)
 // ==========================================================
+// Basic Wrappers
 double GetHigh(int index);
 double GetLow(int index);
 double GetOpen(int index);
 double GetClose(int index);
 datetime GetTime(int index);
 
+// Trade Management
 void ManageTradeState();
 void ManageOpenPositions();
-void UpdateZigZagMap();
 void CheckTradeEntry();
 void ExecuteEntryLogic(MergedZoneState &zone, int type, bool isBreakout);
 void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent);
+
+// Main Logic Engines
+void UpdateZigZagMap();
 void DrawParallelZones();
+void CalculateTrendsAndLock();
+
+// Zone & Breakout Helpers
 double FindNextTarget(int currentIndex, int targetType);
 datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel);
+bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type);
+datetime FindBreakoutTime(int startBar, int endBar, double level, int type); 
+
+// Drawing & Math Helpers
 void DrawFlippedZone(MergedZoneState &state, datetime endTime);
 void MergeZone(MergedZoneState &state, PointStruct &p, int type);
 void StartZone(MergedZoneState &state, PointStruct &p);
 void DrawSingleZone(datetime t1, datetime t2, double top, double bottom, int type, int id);
-void CalculateTrendsAndLock();
-bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type);
 void CalculateZoneLimits(PointStruct &p); 
 void DrawZigZagLines();
 bool IsBigCandle(int index);
@@ -180,7 +189,7 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_ZZ_"); 
    ObjectsDeleteAll(0, "NCI_Zone_");
    UpdateZigZagMap();
-   Print(">>> V78.2 INIT: Synced Brains (Trend + Zones) Active.");
+   Print(">>> V78.7 INIT: Retro-Scan + Precise Timing + No Overlap.");
    return INIT_SUCCEEDED;
 }
 
@@ -346,7 +355,7 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V78.2 " + comment)) {
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V78.7 " + comment)) {
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
    }
@@ -411,7 +420,7 @@ void ManageTradeState() {
 }
 
 // ==========================================================
-// V78.2: FIXED ZONE PAINTER (SYNCED WITH TREND LOGIC)
+// V78.6: FIXED OVERLAP LOGIC (PRECISE HANDOFF)
 // ==========================================================
 void DrawParallelZones() { 
    ObjectsDeleteAll(0, "NCI_Zone_");
@@ -432,18 +441,22 @@ void DrawParallelZones() {
          if (!supply.isActive) StartZone(supply, p); 
          else { 
             bool isBroken = CheckForBreakout(supply.lastBarIndex, p.barIndex, supply.top, 1);
-            if (p.price > supply.top) isBroken = true; // *** V78.2 FIX: Manual Destination Check ***
+            if (p.price > supply.top) isBroken = true; 
 
             if (isBroken) { 
-               DrawSingleZone(supply.startTime, p.time, supply.top, supply.bottom, 1, i-1); 
+               // *** FIX 1: FIND EXACT BREAK TIME ***
+               datetime preciseBreakTime = FindBreakoutTime(supply.lastBarIndex, p.barIndex, supply.top, 1);
+               if (preciseBreakTime == 0) preciseBreakTime = p.time; // Fallback
+
+               // *** FIX 2: STOP OLD ZONE AT BREAK TIME (NO OVERLAP) ***
+               DrawSingleZone(supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1); 
                
                if (p.assignedTrend != 1) { 
                    MergedZoneState flip = supply;
                    flip.isActive = true;
-                   flip.startTime = p.time;
+                   flip.startTime = preciseBreakTime; // START GRAY ZONE EXACTLY HERE
                    
                    double histTarget = FindNextTarget(i, 1); 
-                   if (histTarget == 0) histTarget = activeSupply.bottom; 
                    
                    datetime deathTime = CheckZoneLife(p.barIndex, 1, histTarget, supply.bottom);
                    
@@ -457,6 +470,7 @@ void DrawParallelZones() {
                }
                StartZone(supply, p); 
             } else { 
+               // Standard Merging Logic
                bool shouldMerge = false; 
                if (p.zoneLimitTop > supply.top) shouldMerge = true; 
                else { 
@@ -477,18 +491,22 @@ void DrawParallelZones() {
          if (!demand.isActive) StartZone(demand, p); 
          else { 
             bool isBroken = CheckForBreakout(demand.lastBarIndex, p.barIndex, demand.bottom, -1);
-            if (p.price < demand.bottom) isBroken = true; // *** V78.2 FIX: Manual Destination Check ***
+            if (p.price < demand.bottom) isBroken = true; 
 
             if (isBroken) { 
-               DrawSingleZone(demand.startTime, p.time, demand.top, demand.bottom, -1, i-1); 
+               // *** FIX 1: FIND EXACT BREAK TIME ***
+               datetime preciseBreakTime = FindBreakoutTime(demand.lastBarIndex, p.barIndex, demand.bottom, -1);
+               if (preciseBreakTime == 0) preciseBreakTime = p.time; // Fallback
+
+               // *** FIX 2: STOP OLD ZONE AT BREAK TIME (NO OVERLAP) ***
+               DrawSingleZone(demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1); 
                
                if (p.assignedTrend != -1) { 
                    MergedZoneState flip = demand;
                    flip.isActive = true;
-                   flip.startTime = p.time;
+                   flip.startTime = preciseBreakTime; // START GRAY ZONE EXACTLY HERE
                    
                    double histTarget = FindNextTarget(i, -1);
-                   if (histTarget == 0) histTarget = activeDemand.top;
                    
                    datetime deathTime = CheckZoneLife(p.barIndex, -1, histTarget, demand.top);
                    
@@ -502,6 +520,7 @@ void DrawParallelZones() {
                }
                StartZone(demand, p); 
             } else { 
+               // Standard Merging Logic
                bool shouldMerge = false; 
                if (p.zoneLimitBottom < demand.bottom) shouldMerge = true; 
                else { 
@@ -528,6 +547,73 @@ void DrawParallelZones() {
    ChartRedraw(); 
 }
 
+// *** HELPER: Scans range to find exact breakout candle ***
+datetime FindBreakoutTime(int startBar, int endBar, double level, int type) {
+   for (int i = startBar - 1; i >= endBar; i--) {
+       if (i < 0) return 0;
+       if (type == 1) { // Supply Break (Up)
+           if (GetClose(i) > level) return GetTime(i);
+       } else { // Demand Break (Down)
+           if (GetClose(i) < level) return GetTime(i);
+       }
+   }
+   return 0;
+}
+
+// ==========================================================
+// V78.7: RETRO-SCAN TARGETS (LOOK BACKWARDS) - THE FIX
+// ==========================================================
+double FindNextTarget(int currentIndex, int targetType)
+{
+   // FIXED: Look BACKWARDS into history to find the previous structure
+   for(int k = currentIndex - 1; k >= 0; k--) 
+   {
+      if (ZigZagPoints[k].type == targetType) {
+         if (targetType == 1) return ZigZagPoints[k].zoneLimitBottom; 
+         if (targetType == -1) return ZigZagPoints[k].zoneLimitTop;   
+      }
+   }
+   return 0; 
+}
+
+// ==========================================================
+// V78.4: SMART TARGETS (SIMPLE HIT, STRICT BREAK)
+// ==========================================================
+datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel)
+{
+   for(int i = startBar - 1; i > 0; i--) 
+   {
+      double close = GetClose(i);
+
+      if (targetLevel != 0) {
+          if (type == 1) { 
+             if (close > targetLevel) return GetTime(i);
+          } else { 
+             if (close < targetLevel) return GetTime(i);
+          }
+      }
+
+      if (type == 1) { 
+          if (CheckForBreakout(i+1, i, selfBreakLevel, -1)) return GetTime(i);
+      } else { 
+          if (CheckForBreakout(i+1, i, selfBreakLevel, 1)) return GetTime(i);
+      }
+   }
+   return 0; 
+}
+
+void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
+   string name = "NCI_Flip_" + TimeToString(state.startTime);
+   if(ObjectFind(0,name)<0) {
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, state.startTime, state.top, endTime, state.bottom);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, FlippedColor); 
+      ObjectSetInteger(0, name, OBJPROP_FILL, true); 
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   } else {
+      ObjectSetInteger(0, name, OBJPROP_TIME, 1, endTime);
+   }
+}
+
 // ==========================================================
 // V78.0: BLIND SPOT FIX (MANUAL CHECK IN TREND LOGIC)
 // ==========================================================
@@ -546,7 +632,6 @@ void CalculateTrendsAndLock() {
       
       bool brokenSupply = false; bool brokenDemand = false; 
       
-      // V78.0 LOGIC: Syncs Trend Line with the same manual check
       if (lastSupplyIdx != -1) {
           brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
           if (p.price > lastSupplyLevel) brokenSupply = true; 
@@ -570,10 +655,8 @@ void CalculateTrendsAndLock() {
    currentMarketTrend = runningTrend; 
 }
 
-// *** REVERTED: Loop uses '> ' (not '>=') ***
-// This blindly skips the destination candle.
 bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) { 
-   for (int i = startBarIdx - 1; i > endBarIdx; i--) { 
+   for (int i = startBarIdx - 1; i >= endBarIdx; i--) { 
       if (i-1 < 0) return false; 
       if (type == 1) { 
          double c1 = GetClose(i); 
@@ -588,88 +671,97 @@ bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) {
    return false; 
 }
 
-double FindNextTarget(int currentIndex, int targetType)
-{
-   int total = ArraySize(ZigZagPoints);
-   for(int k = currentIndex + 1; k < total; k++) 
-   {
-      if (ZigZagPoints[k].type == targetType) {
-         if (targetType == 1) return ZigZagPoints[k].zoneLimitBottom; 
-         if (targetType == -1) return ZigZagPoints[k].zoneLimitTop;   
-      }
-   }
-   return 0; 
-}
-
-datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel)
-{
-   for(int i = startBar - 1; i >= 0; i--) 
-   {
-      double close = SymbolInfoDouble(_Symbol, SYMBOL_BID); 
-      if (i > 0) close = GetClose(i); 
-      
-      if (type == 1) { 
-         if ((close > targetLevel && targetLevel != 0) || (close < selfBreakLevel)) 
-            return GetTime(i);
-      }
-      else if (type == -1) { 
-         if ((close < targetLevel && targetLevel != 0) || (close > selfBreakLevel)) 
-            return GetTime(i);
-      }
-   }
-   return 0; 
-}
-
-void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
-   string name = "NCI_Flip_" + TimeToString(state.startTime);
-   if(ObjectFind(0,name)<0) {
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, state.startTime, state.top, endTime, state.bottom);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, FlippedColor); 
-      ObjectSetInteger(0, name, OBJPROP_FILL, true); 
-      ObjectSetInteger(0, name, OBJPROP_BACK, true);
-   } else {
-      ObjectSetInteger(0, name, OBJPROP_TIME, 1, endTime);
-   }
-}
-
-// ==========================================================
-// V76: TRADER'S MINDSET MERGING (Anchored SL)
-// ==========================================================
-void MergeZone(MergedZoneState &state, PointStruct &p, int type) { 
-   if (type == 1) { // SUPPLY
-      state.top = MathMax(state.top, p.price); // Anchor SL
-      state.bottom = p.zoneLimitBottom;        // Update Entry
-   } else { // DEMAND
-      state.bottom = MathMin(state.bottom, p.price); // Anchor SL
-      state.top = p.zoneLimitTop;                    // Update Entry
+void CalculateZoneLimits(PointStruct &p) { 
+   p.zoneLimitTop = p.price; 
+   p.zoneLimitBottom = p.price; 
+   if (p.type == 1) { 
+      int gI=-1, rI=-1; 
+      for(int k=0;k<=5;k++){
+         if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
+         if(IsGreen(p.barIndex+k)){gI=p.barIndex+k;break;}
+      } 
+      if(gI!=-1) rI=gI-1; 
+      if(gI!=-1) { 
+         p.zoneLimitBottom = GetOpen(gI); 
+         if(IsBigCandle(gI)){ 
+            if(rI!=-1){ 
+               p.zoneLimitBottom = GetOpen(rI); 
+               if(IsBigCandle(rI)) p.zoneLimitBottom=(GetOpen(rI)+GetClose(rI))/2.0; 
+            } else p.zoneLimitBottom=(GetOpen(gI)+GetClose(gI))/2.0; 
+         } 
+      } 
+   } else { 
+      int rI=-1, gI=-1; 
+      for(int k=0;k<=5;k++){
+         if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
+         if(IsRed(p.barIndex+k)){rI=p.barIndex+k;break;}
+      } 
+      if(rI!=-1) gI=rI-1; 
+      if(rI!=-1) { 
+         p.zoneLimitTop = GetOpen(rI); 
+         if(IsBigCandle(rI)){ 
+            if(gI!=-1){ 
+               p.zoneLimitTop = GetOpen(gI); 
+               if(IsBigCandle(gI)) p.zoneLimitTop=(GetOpen(gI)+GetClose(gI))/2.0; 
+            } else p.zoneLimitTop=(GetOpen(rI)+GetClose(rI))/2.0; 
+         } 
+      } 
    } 
-   state.startTime = p.time; 
-   state.lastBarIndex = p.barIndex; 
 }
 
-void StartZone(MergedZoneState &state, PointStruct &p) { 
-   state.isActive=true; 
-   state.top=p.zoneLimitTop; 
-   state.bottom=p.zoneLimitBottom; 
-   state.startTime=p.time; 
-   state.lastBarIndex=p.barIndex; 
+bool IsBigCandle(int index) { 
+   double b=MathAbs(GetOpen(index)-GetClose(index)); 
+   double s=0; int c=0; 
+   int bars = Bars(_Symbol, _Period); 
+   for(int k=1;k<=10;k++){
+      if(index+k>=bars)break;
+      s+=MathAbs(GetOpen(index+k)-GetClose(index+k));
+      c++;
+   } 
+   if(c==0)return false; return(b>(s/c)*BigCandleFactor); 
 }
 
+void DrawZigZagLines() { 
+   ObjectsDeleteAll(0, "NCI_ZZ_"); 
+   int c=ArraySize(ZigZagPoints); 
+   if(c<2)return; 
+   for(int i=1;i<c;i++){ 
+      int t=ZigZagPoints[i].assignedTrend; 
+      color cl=(t==1)?ColorUp:(t==-1)?ColorDown:ColorRange; 
+      string n="NCI_ZZ_"+IntegerToString(i); 
+      ObjectCreate(0,n,OBJ_TREND,0,ZigZagPoints[i-1].time,ZigZagPoints[i-1].price,ZigZagPoints[i].time,ZigZagPoints[i].price); 
+      ObjectSetInteger(0,n,OBJPROP_COLOR,cl); 
+      ObjectSetInteger(0,n,OBJPROP_WIDTH,LineWidth); 
+      ObjectSetInteger(0,n,OBJPROP_RAY_RIGHT,false); 
+      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); 
+   } 
+   ChartRedraw(); 
+}
+
+void DrawZigZag() { /* Deprecated */ }
+
+// ... (STANDARD HELPERS) ...
+void AddPoint(PointStruct &arr[], PointStruct &p) { int s=ArraySize(arr); ArrayResize(arr,s+1); arr[s]=p; }
+void StartZone(MergedZoneState &state, PointStruct &p) { state.isActive=true; state.top=p.zoneLimitTop; state.bottom=p.zoneLimitBottom; state.startTime=p.time; state.lastBarIndex=p.barIndex; }
+void MergeZone(MergedZoneState &state, PointStruct &p, int type) { 
+   if (type == 1) { state.top = MathMax(state.top, p.price); state.bottom = p.zoneLimitBottom; } 
+   else { state.bottom = MathMin(state.bottom, p.price); state.top = p.zoneLimitTop; } 
+   state.startTime = p.time; state.lastBarIndex = p.barIndex; 
+}
 void DrawSingleZone(datetime t1, datetime t2, double top, double bottom, int type, int id) { 
    if (top <= bottom) return; 
    string name = "NCI_Zone_M_" + IntegerToString(id) + "_" + TimeToString(t1); 
    color c = (type == 1) ? SupplyColor : DemandColor; 
-   if(ObjectFind(0,name)<0) { 
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bottom); 
-      ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
-      ObjectSetInteger(0, name, OBJPROP_FILL, true); 
-      ObjectSetInteger(0, name, OBJPROP_BACK, true); 
-      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); 
-   } 
+   if(ObjectFind(0,name)<0) { ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bottom); ObjectSetInteger(0, name, OBJPROP_COLOR, c); ObjectSetInteger(0, name, OBJPROP_FILL, true); ObjectSetInteger(0, name, OBJPROP_BACK, true); ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); } 
 }
 
+bool IsStrongBody(int index) { double h=GetHigh(index); double l=GetLow(index); if(h-l==0)return false; double b=MathAbs(GetOpen(index)-GetClose(index)); return(b>(h-l)*MinBodyPercent); }
+bool IsGreen(int index) { return GetClose(index)>GetOpen(index); }
+bool IsRed(int index) { return GetClose(index)<GetOpen(index); }
+bool IsNewBar() { static datetime last; datetime curr=(datetime)SeriesInfoInteger(_Symbol,_Period,SERIES_LASTBAR_DATE); if(last!=curr){last=curr;return true;} return false; }
+
 // ==========================================================
-// V77: FLEXIBLE BREAKOUT LOGIC
+// V77: FLEXIBLE BREAKOUT LOGIC (THE ENGINE)
 // ==========================================================
 void UpdateZigZagMap() { 
    int totalBars = Bars(_Symbol, _Period); 
@@ -678,17 +770,13 @@ void UpdateZigZagMap() {
    int alarmCount = 0; 
    int startBar = MathMin(HistoryBars, totalBars - 10); 
    for (int i = startBar; i >= 5; i--) { 
-      
-      // SUPPLY CHECK
       if (IsGreen(i)) { 
          int c1=i-1; int c2=i-2; 
          if(IsRed(c1)){ 
             if(IsStrongBody(c1)){ 
-               // NEW V77 LOGIC: Same Color OR Different Color but closed Below Zone
                bool confirm = false;
                if(IsRed(c2)) confirm = true;
                else if(GetClose(c2) < GetOpen(i)) confirm = true; 
-
                if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
                   Alarms[alarmCount].price=GetHigh(i); 
@@ -715,17 +803,13 @@ void UpdateZigZagMap() {
             } 
          } 
       } 
-      
-      // DEMAND CHECK
       if (IsRed(i)) { 
          int c1=i-1; int c2=i-2; 
          if(IsGreen(c1)){ 
             if(IsStrongBody(c1)){ 
-               // NEW V77 LOGIC: Same Color OR Different Color but closed Above Zone
                bool confirm = false;
                if(IsGreen(c2)) confirm = true;
                else if(GetClose(c2) > GetOpen(i)) confirm = true;
-
                if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
                   Alarms[alarmCount].price=GetLow(i); 
@@ -813,77 +897,3 @@ void UpdateZigZagMap() {
    DrawZigZagLines(); 
    if(DrawZones) DrawParallelZones(); 
 }
-
-void CalculateZoneLimits(PointStruct &p) { 
-   p.zoneLimitTop = p.price; 
-   p.zoneLimitBottom = p.price; 
-   if (p.type == 1) { 
-      int gI=-1, rI=-1; 
-      for(int k=0;k<=5;k++){
-         if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
-         if(IsGreen(p.barIndex+k)){gI=p.barIndex+k;break;}
-      } 
-      if(gI!=-1) rI=gI-1; 
-      if(gI!=-1) { 
-         p.zoneLimitBottom = GetOpen(gI); 
-         if(IsBigCandle(gI)){ 
-            if(rI!=-1){ 
-               p.zoneLimitBottom = GetOpen(rI); 
-               if(IsBigCandle(rI)) p.zoneLimitBottom=(GetOpen(rI)+GetClose(rI))/2.0; 
-            } else p.zoneLimitBottom=(GetOpen(gI)+GetClose(gI))/2.0; 
-         } 
-      } 
-   } else { 
-      int rI=-1, gI=-1; 
-      for(int k=0;k<=5;k++){
-         if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
-         if(IsRed(p.barIndex+k)){rI=p.barIndex+k;break;}
-      } 
-      if(rI!=-1) gI=rI-1; 
-      if(rI!=-1) { 
-         p.zoneLimitTop = GetOpen(rI); 
-         if(IsBigCandle(rI)){ 
-            if(gI!=-1){ 
-               p.zoneLimitTop = GetOpen(gI); 
-               if(IsBigCandle(gI)) p.zoneLimitTop=(GetOpen(gI)+GetClose(gI))/2.0; 
-            } else p.zoneLimitTop=(GetOpen(rI)+GetClose(rI))/2.0; 
-         } 
-      } 
-   } 
-}
-
-bool IsBigCandle(int index) { 
-   double b=MathAbs(GetOpen(index)-GetClose(index)); 
-   double s=0; int c=0; 
-   int bars = Bars(_Symbol, _Period); 
-   for(int k=1;k<=10;k++){
-      if(index+k>=bars)break;
-      s+=MathAbs(GetOpen(index+k)-GetClose(index+k));
-      c++;
-   } 
-   if(c==0)return false; return(b>(s/c)*BigCandleFactor); 
-}
-
-void DrawZigZagLines() { 
-   ObjectsDeleteAll(0, "NCI_ZZ_"); 
-   int c=ArraySize(ZigZagPoints); 
-   if(c<2)return; 
-   for(int i=1;i<c;i++){ 
-      int t=ZigZagPoints[i].assignedTrend; 
-      color cl=(t==1)?ColorUp:(t==-1)?ColorDown:ColorRange; 
-      string n="NCI_ZZ_"+IntegerToString(i); 
-      ObjectCreate(0,n,OBJ_TREND,0,ZigZagPoints[i-1].time,ZigZagPoints[i-1].price,ZigZagPoints[i].time,ZigZagPoints[i].price); 
-      ObjectSetInteger(0,n,OBJPROP_COLOR,cl); 
-      ObjectSetInteger(0,n,OBJPROP_WIDTH,LineWidth); 
-      ObjectSetInteger(0,n,OBJPROP_RAY_RIGHT,false); 
-      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); 
-   } 
-   ChartRedraw(); 
-}
-
-void DrawZigZag() { /* Deprecated */ }
-void AddPoint(PointStruct &arr[], PointStruct &p) { int s=ArraySize(arr); ArrayResize(arr,s+1); arr[s]=p; }
-bool IsStrongBody(int index) { double h=GetHigh(index); double l=GetLow(index); if(h-l==0)return false; double b=MathAbs(GetOpen(index)-GetClose(index)); return(b>(h-l)*MinBodyPercent); }
-bool IsGreen(int index) { return GetClose(index)>GetOpen(index); }
-bool IsRed(int index) { return GetClose(index)<GetOpen(index); }
-bool IsNewBar() { static datetime last; datetime curr=(datetime)SeriesInfoInteger(_Symbol,_Period,SERIES_LASTBAR_DATE); if(last!=curr){last=curr;return true;} return false; }

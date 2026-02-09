@@ -1,0 +1,71 @@
+//+------------------------------------------------------------------+
+//| NCI_Constants.mqh - Inputs, Enums & Settings                     |
+//+------------------------------------------------------------------+
+#property strict
+
+// --- ENUMS ---
+enum ENUM_REENTRY_MODE {
+   MODE_SINGLE   = 0, // One Trade Only (Conservative)
+   MODE_DOUBLE   = 1, // Two Trades (1st @ 1.0%, 2nd @ 0.5%) - DEFAULT
+   MODE_INFINITE = 2  // Infinite Trades (Aggressive)
+};
+
+//--- 1. VISUAL SETTINGS
+input group "Visual Settings"
+input int HistoryBars       = 5000;
+input int LineWidth         = 2;
+input bool DrawZones        = true;
+
+// ZONE COLORS (Fixed)
+color SupplyColor     = clrMaroon; 
+color DemandColor     = clrDarkGreen;
+color FlippedColor    = clrGray; 
+
+//--- 2. TREND COLORS (Fixed)
+color ColorUp         = clrLimeGreen;
+color ColorDown       = clrRed;
+color ColorRange      = clrYellow;
+
+//--- 3. STRUCTURE RULES
+input group "Structure Rules"
+input double MinBodyPercent = 0.50;  
+input int MaxScanDistance   = 3;
+input double BigCandleFactor = 1.3; 
+
+//--- 4. TRADING SETTINGS
+input group "Trading Logic"
+input bool AllowTrading      = true;
+input bool AllowTrendEntry    = true; 
+input bool AllowBreakoutEntry = true; 
+input double RiskPercent     = 1.0;  
+input double MinRiskReward   = 2.0;  
+
+// Re-Entry Logic
+input group "Re-Entry Logic"
+input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE; 
+
+// Volatility Guard
+input group "Volatility Guard"
+input bool   UseVolatilityGuard = true; 
+input int    MaxSpreadPoints   = 30; 
+input int    MaxCandleSizePips = 80; 
+
+//--- 5. SCALING & ENTRY
+input group "Entry Logic"
+input double ReferenceZonePips = 235.0;
+input double BaseEntryDepth    = 0.40;  
+input double BaseMaxDepth      = 0.75;
+input double TPZoneDepth     = 0.0;
+
+//--- 6. BUFFER SETTINGS
+input group "Buffer Logic"
+input bool   UseDynamicBuffer = false; 
+input double BaseBufferPoints = 45.0;  
+input double MinBufferPoints  = 20;   
+input double MaxBufferPoints  = 200;  
+
+//--- 7. RISK MANAGEMENT
+input group "Risk Management"
+input bool   EnableProfitLocking = true;
+input double LockTriggerPercent  = 0.80; 
+input double LockPositionPercent = 0.70;
