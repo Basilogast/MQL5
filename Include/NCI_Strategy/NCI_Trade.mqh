@@ -117,12 +117,12 @@ void CheckTradeEntry()
    if (PositionsTotal() > 0) return;
    
    // --- 1. CHECK HTF TRADES ---
-   if (AllowTrade_HTF) { // NEW TOGGLE CHECK
-       if (AllowTrendEntry && activeSupply_HTF.isActive && activeDemand_HTF.isActive) {
+   if (AllowTrade_HTF) { 
+       if (AllowTrendEntry_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { // CHECK HTF TREND
           if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF");
           else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF");
        }
-       if (AllowBreakoutEntry) {
+       if (AllowBreakoutEntry_HTF) { // CHECK HTF BREAKOUT
           if (activeFlippedSupply_HTF.isActive && activeDemand_HTF.isActive && activeFlippedSupply_HTF.endTime == 0) 
              ExecuteEntryLogic(activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF");
           if (activeFlippedDemand_HTF.isActive && activeSupply_HTF.isActive && activeFlippedDemand_HTF.endTime == 0) 
@@ -131,12 +131,12 @@ void CheckTradeEntry()
    }
 
    // --- 2. CHECK LTF TRADES ---
-   if (AllowTrade_LTF) { // NEW TOGGLE CHECK
-       if (AllowTrendEntry && activeSupply_LTF.isActive && activeDemand_LTF.isActive) {
+   if (AllowTrade_LTF) { 
+       if (AllowTrendEntry_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { // CHECK LTF TREND
           if (currentMarketTrend_LTF == 1) ExecuteEntryLogic(activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF");
           else if (currentMarketTrend_LTF == -1) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF");
        }
-       if (AllowBreakoutEntry) {
+       if (AllowBreakoutEntry_LTF) { // CHECK LTF BREAKOUT
           if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) 
              ExecuteEntryLogic(activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF");
           if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) 

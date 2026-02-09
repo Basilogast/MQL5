@@ -38,10 +38,17 @@ input double BigCandleFactor = 1.3;
 //--- 4. TRADING SETTINGS
 input group "Trading Logic"
 input bool AllowTrading      = true; // Master Switch
-input bool AllowTrade_HTF    = false; // NEW: Toggle 1H Trades
-input bool AllowTrade_LTF    = true; // NEW: Toggle 15M Trades
-input bool AllowTrendEntry    = true; 
-input bool AllowBreakoutEntry = true; 
+
+// HTF Specifics
+input bool AllowTrade_HTF    = false;        // Master HTF Toggle
+input bool AllowTrendEntry_HTF    = true;   // NEW: 1H Trend Only
+input bool AllowBreakoutEntry_HTF = true;   // NEW: 1H Breakout Only
+
+// LTF Specifics
+input bool AllowTrade_LTF    = true;        // Master LTF Toggle
+input bool AllowTrendEntry_LTF    = true;   // NEW: 15M Trend Only
+input bool AllowBreakoutEntry_LTF = false;   // NEW: 15M Breakout Only
+
 input double RiskPercent     = 1.0;  
 input double MinRiskReward   = 2.0;  
 
