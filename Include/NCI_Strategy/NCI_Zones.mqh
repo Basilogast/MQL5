@@ -40,53 +40,58 @@ void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
 
 // --- LOGIC FUNCTIONS ---
 
-// Directional Target Finder (Filters out "Wrong Way" targets)
+// *** 1. FIND TARGET (FAR SIDE) ***
 double FindNextTarget(int currentIndex, int targetType, double referencePrice)
 {
+   // Retro-Scan: Look backwards for structure
    for(int k = currentIndex - 1; k >= 0; k--) 
    {
       if (ZigZagPoints[k].type == targetType) {
          if (targetType == 1) { 
-            // Buying: Target must be ABOVE the breakout level
-            if (ZigZagPoints[k].zoneLimitBottom > referencePrice) return ZigZagPoints[k].zoneLimitBottom; 
+            // BUYING: Target is Supply.
+            // Condition 1: Supply must be ABOVE our entry (Reference).
+            // Condition 2: Return the TOP of Supply (Far Side) for breakout check.
+            if (ZigZagPoints[k].zoneLimitBottom > referencePrice) return ZigZagPoints[k].zoneLimitTop; 
          }
          if (targetType == -1) { 
-            // Selling: Target must be BELOW the breakout level
-            if (ZigZagPoints[k].zoneLimitTop < referencePrice) return ZigZagPoints[k].zoneLimitTop;   
+            // SELLING: Target is Demand.
+            // Condition 1: Demand must be BELOW our entry (Reference).
+            // Condition 2: Return the BOTTOM of Demand (Far Side) for breakout check.
+            if (ZigZagPoints[k].zoneLimitTop < referencePrice) return ZigZagPoints[k].zoneLimitBottom;   
          }
       }
    }
-   return 0; 
+   return 0; // No valid target found
 }
 
-// *** UPDATED: STRICT RULES FOR BOTH TARGET AND FAILURE ***
+// *** 2. CHECK LIFE (STRICT BREAKOUT ON BOTH SIDES) ***
 datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel)
 {
    for(int i = startBar - 1; i > 0; i--) 
    {
-      // 1. Target Hit (NOW STRICT MOMENTUM)
-      // "type == 1" means Buy Zone (Flipped Demand). We win if price breaks UP through Resistance (Target).
+      // --- A. PROFIT SIDE (TARGET BREAKOUT) ---
       if (targetLevel != 0) {
           if (type == 1) { 
-             // Check for Strong Break UP through Target
+             // Buy Trade: Did we Break UP through the Supply Top?
              if (CheckForBreakout(i+1, i, targetLevel, 1)) return GetTime(i); 
           } 
           else { 
-             // Check for Strong Break DOWN through Target
+             // Sell Trade: Did we Break DOWN through the Demand Bottom?
              if (CheckForBreakout(i+1, i, targetLevel, -1)) return GetTime(i); 
           }
       }
 
-      // 2. Self Break (Strict Momentum) - Existing Logic
-      // "type == 1" means Buy Zone. We lose if price breaks DOWN through Self (Support).
+      // --- B. LOSS SIDE (SELF BREAKOUT) ---
       if (type == 1) { 
+          // Buy Trade: Did we Break DOWN through Support?
           if (CheckForBreakout(i+1, i, selfBreakLevel, -1)) return GetTime(i); 
       } 
       else { 
+          // Sell Trade: Did we Break UP through Resistance?
           if (CheckForBreakout(i+1, i, selfBreakLevel, 1)) return GetTime(i); 
       }
    }
-   return 0; 
+   return 0; // Zone is still alive
 }
 
 void DrawParallelZones() { 
@@ -122,7 +127,10 @@ void DrawParallelZones() {
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
+                   // Find Target (Top of next Supply)
                    double histTarget = FindNextTarget(i, 1, supply.top); 
+                   
+                   // Check Life (Break Supply Top OR Break Self Bottom)
                    datetime deathTime = CheckZoneLife(p.barIndex, 1, histTarget, supply.bottom);
                    
                    if (deathTime == 0) {
@@ -168,7 +176,10 @@ void DrawParallelZones() {
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
+                   // Find Target (Bottom of next Demand)
                    double histTarget = FindNextTarget(i, -1, demand.bottom); 
+                   
+                   // Check Life (Break Demand Bottom OR Break Self Top)
                    datetime deathTime = CheckZoneLife(p.barIndex, -1, histTarget, demand.top);
                    
                    if (deathTime == 0) {
