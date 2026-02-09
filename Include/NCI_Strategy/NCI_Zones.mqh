@@ -17,7 +17,7 @@ void MergeZone(MergedZoneState &state, PointStruct &p, int type) {
    state.startTime = p.time; state.lastBarIndex = p.barIndex; 
 }
 
-// *** UPDATED: VISUAL TOGGLE CHECK ***
+// *** UPDATED: VISUAL TOGGLE & COLOR LAYERING ***
 void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double bottom, int type, int id) { 
    if (top <= bottom) return; 
    
@@ -26,8 +26,24 @@ void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double 
    if (suffix == "_LTF" && !ShowLTF) return;
 
    string name = "NCI_Zone_" + suffix + IntegerToString(id) + "_" + TimeToString(t1); 
-   color c = (type == 1) ? SupplyColor : DemandColor; 
-   if(ObjectFind(0,name)<0) { ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bottom); ObjectSetInteger(0, name, OBJPROP_COLOR, c); ObjectSetInteger(0, name, OBJPROP_FILL, true); ObjectSetInteger(0, name, OBJPROP_BACK, true); ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); } 
+   
+   // --- COLOR LOGIC: H1 = Light (Background), M15 = Dark (Foreground) ---
+   color c;
+   if (suffix == "_HTF") {
+       // Lighter / Muted colors for H1
+       c = (type == 1) ? clrIndianRed : clrMediumSeaGreen; 
+   } else {
+       // Standard Dark colors for M15 (from Constants)
+       c = (type == 1) ? SupplyColor : DemandColor; 
+   }
+
+   if(ObjectFind(0,name)<0) { 
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bottom); 
+      ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
+      ObjectSetInteger(0, name, OBJPROP_FILL, true); 
+      ObjectSetInteger(0, name, OBJPROP_BACK, true); // Sends to background so lines draw on top
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); 
+   } 
 }
 
 // *** UPDATED: VISUAL TOGGLE CHECK ***
@@ -37,9 +53,14 @@ void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
    if (suffix == "_LTF" && !ShowLTF) return;
 
    string name = "NCI_Flip_" + suffix + TimeToString(state.startTime);
+   
+   // Optional: Make H1 Flip zones slightly lighter too, if desired
+   color c = FlippedColor;
+   if (suffix == "_HTF") c = clrSilver; // Lighter gray for H1 Flip
+
    if(ObjectFind(0,name)<0) {
       ObjectCreate(0, name, OBJ_RECTANGLE, 0, state.startTime, state.top, endTime, state.bottom);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, FlippedColor); 
+      ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
       ObjectSetInteger(0, name, OBJPROP_FILL, true); 
       ObjectSetInteger(0, name, OBJPROP_BACK, true);
    } else {
