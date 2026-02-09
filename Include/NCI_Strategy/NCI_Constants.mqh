@@ -37,7 +37,9 @@ input double BigCandleFactor = 1.3;
 
 //--- 4. TRADING SETTINGS
 input group "Trading Logic"
-input bool AllowTrading      = true;
+input bool AllowTrading      = true; // Master Switch
+input bool AllowTrade_HTF    = false; // NEW: Toggle 1H Trades
+input bool AllowTrade_LTF    = true; // NEW: Toggle 15M Trades
 input bool AllowTrendEntry    = true; 
 input bool AllowBreakoutEntry = true; 
 input double RiskPercent     = 1.0;  
