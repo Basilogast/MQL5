@@ -2,43 +2,33 @@
 //| NCI_ZigZag.mqh - Structure & Trend Engine                        |
 //+------------------------------------------------------------------+
 #property strict
-
 #include "NCI_Constants.mqh"
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh"
 
-void CalculateTrendsAndLock() { 
-   int count = ArraySize(ZigZagPoints); 
+// Pass Timeframe and Target Array
+void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &marketTrend) { 
+   int count = ArraySize(points); 
    if (count < 2) return; 
    int runningTrend = 0; 
    double lastSupplyLevel = 0; int lastSupplyIdx = -1; 
    double lastDemandLevel = 0; int lastDemandIdx = -1; 
    double prevHigh = 0; double prevLow = 0; 
+   
    for (int i = 1; i < count; i++) { 
-      PointStruct p = ZigZagPoints[i]; 
-      PointStruct prev = ZigZagPoints[i-1]; 
+      PointStruct p = points[i]; 
+      PointStruct prev = points[i-1]; 
       if (prev.type == 1) { lastSupplyLevel = prev.zoneLimitTop; lastSupplyIdx = prev.barIndex; prevHigh = prev.price; } 
       if (prev.type == -1) { lastDemandLevel = prev.zoneLimitBottom; lastDemandIdx = prev.barIndex; prevLow = prev.price; } 
       
       bool brokenSupply = false; bool brokenDemand = false; 
       
-      // *** CRITICAL FIX: Use Strict 2-Candle Logic for Line Coloring ***
-      
       if (lastSupplyIdx != -1) {
-          // OLD LOGIC (Simple Touch):
-          // if (p.price > lastSupplyLevel) brokenSupply = true; 
-          
-          // NEW LOGIC (Strict Close):
-          // We check if strict breakout rules were met between creation and now.
-          brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
+          brokenSupply = CheckForBreakout(tf, lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
       }
       
       if (lastDemandIdx != -1) {
-          // OLD LOGIC (Simple Touch):
-          // if (p.price < lastDemandLevel) brokenDemand = true; 
-          
-          // NEW LOGIC (Strict Close):
-          brokenDemand = CheckForBreakout(lastDemandIdx, p.barIndex, lastDemandLevel, -1);
+          brokenDemand = CheckForBreakout(tf, lastDemandIdx, p.barIndex, lastDemandLevel, -1);
       }
 
       if (runningTrend == -1) { if (brokenSupply) runningTrend = 0; } 
@@ -49,98 +39,103 @@ void CalculateTrendsAndLock() {
          if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) runningTrend = 1; 
          if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) runningTrend = -1; 
       } 
-      ZigZagPoints[i].assignedTrend = runningTrend; 
+      points[i].assignedTrend = runningTrend; 
    } 
-   currentMarketTrend = runningTrend; 
+   marketTrend = runningTrend; 
 }
 
-void CalculateZoneLimits(PointStruct &p) { 
+void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) { 
    p.zoneLimitTop = p.price; 
    p.zoneLimitBottom = p.price; 
+   int bars = Bars(_Symbol, tf);
+
    if (p.type == 1) { 
       int gI=-1, rI=-1; 
       for(int k=0;k<=5;k++){ 
-         if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
-         if(IsGreen(p.barIndex+k)){gI=p.barIndex+k;break;} 
+         if(p.barIndex+k >= bars) break; 
+         if(IsGreen(tf, p.barIndex+k)){gI=p.barIndex+k;break;} 
       } 
       if(gI!=-1) rI=gI-1; 
       if(gI!=-1) { 
-         p.zoneLimitBottom = GetOpen(gI); 
-         if(IsBigCandle(gI)){ 
+         p.zoneLimitBottom = GetOpen(tf, gI); 
+         if(IsBigCandle(tf, gI)){ 
             if(rI!=-1){ 
-               p.zoneLimitBottom = GetOpen(rI); 
-               if(IsBigCandle(rI)) p.zoneLimitBottom=(GetOpen(rI)+GetClose(rI))/2.0; 
-            } else p.zoneLimitBottom=(GetOpen(gI)+GetClose(gI))/2.0; 
+               p.zoneLimitBottom = GetOpen(tf, rI); 
+               if(IsBigCandle(tf, rI)) p.zoneLimitBottom=(GetOpen(tf, rI)+GetClose(tf, rI))/2.0; 
+            } else p.zoneLimitBottom=(GetOpen(tf, gI)+GetClose(tf, gI))/2.0; 
          } 
       } 
    } else { 
       int rI=-1, gI=-1; 
       for(int k=0;k<=5;k++){ 
-         if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
-         if(IsRed(p.barIndex+k)){rI=p.barIndex+k;break;} 
+         if(p.barIndex+k >= bars) break; 
+         if(IsRed(tf, p.barIndex+k)){rI=p.barIndex+k;break;} 
       } 
       if(rI!=-1) gI=rI-1; 
       if(rI!=-1) { 
-         p.zoneLimitTop = GetOpen(rI); 
-         if(IsBigCandle(rI)){ 
+         p.zoneLimitTop = GetOpen(tf, rI); 
+         if(IsBigCandle(tf, rI)){ 
             if(gI!=-1){ 
-               p.zoneLimitTop = GetOpen(gI); 
-               if(IsBigCandle(gI)) p.zoneLimitTop=(GetOpen(gI)+GetClose(gI))/2.0; 
-            } else p.zoneLimitTop=(GetOpen(rI)+GetClose(rI))/2.0; 
+               p.zoneLimitTop = GetOpen(tf, gI); 
+               if(IsBigCandle(tf, gI)) p.zoneLimitTop=(GetOpen(tf, gI)+GetClose(tf, gI))/2.0; 
+            } else p.zoneLimitTop=(GetOpen(tf, rI)+GetClose(tf, rI))/2.0; 
          } 
       } 
    } 
 }
 
-void DrawZigZagLines() { 
-   ObjectsDeleteAll(0, "NCI_ZZ_"); 
-   int c=ArraySize(ZigZagPoints); 
+void DrawZigZagLines(string suffix, PointStruct &points[]) { 
+   ObjectsDeleteAll(0, "NCI_ZZ_" + suffix); 
+   int c=ArraySize(points); 
    if(c<2)return; 
+   
+   int width = (suffix == "_HTF") ? LineWidth + 1 : LineWidth; 
+
    for(int i=1;i<c;i++){ 
-      int t=ZigZagPoints[i].assignedTrend; 
+      int t=points[i].assignedTrend; 
       color cl=(t==1)?ColorUp:(t==-1)?ColorDown:ColorRange; 
-      string n="NCI_ZZ_"+IntegerToString(i); 
-      ObjectCreate(0,n,OBJ_TREND,0,ZigZagPoints[i-1].time,ZigZagPoints[i-1].price,ZigZagPoints[i].time,ZigZagPoints[i].price); 
+      string n="NCI_ZZ_" + suffix + IntegerToString(i); 
+      ObjectCreate(0,n,OBJ_TREND,0,points[i-1].time,points[i-1].price,points[i].time,points[i].price); 
       ObjectSetInteger(0,n,OBJPROP_COLOR,cl); 
-      ObjectSetInteger(0,n,OBJPROP_WIDTH,LineWidth); 
+      ObjectSetInteger(0,n,OBJPROP_WIDTH,width); 
       ObjectSetInteger(0,n,OBJPROP_RAY_RIGHT,false); 
       ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); 
    } 
    ChartRedraw(); 
 }
 
-void UpdateZigZagMap() { 
-   int totalBars = Bars(_Symbol, _Period); 
+void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targetTrend, string suffix) { 
+   int totalBars = Bars(_Symbol, tf); 
    if (totalBars < 500) return; 
    PointStruct Alarms[]; 
    int alarmCount = 0; 
    int startBar = MathMin(HistoryBars, totalBars - 10); 
    for (int i = startBar; i >= 5; i--) { 
-      if (IsGreen(i)) { 
+      if (IsGreen(tf, i)) { 
          int c1=i-1; 
          int c2=i-2; 
-         if(IsRed(c1)){ 
-            if(IsStrongBody(c1)){ 
+         if(IsRed(tf, c1)){ 
+            if(IsStrongBody(tf, c1)){ 
                bool confirm = false; 
-               if(IsRed(c2)) confirm = true; 
-               else if(GetClose(c2) < GetOpen(i)) confirm = true; 
+               if(IsRed(tf, c2)) confirm = true; 
+               else if(GetClose(tf, c2) < GetOpen(tf, i)) confirm = true; 
                if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
-                  Alarms[alarmCount].price=GetHigh(i); 
-                  Alarms[alarmCount].time=GetTime(i); 
+                  Alarms[alarmCount].price=GetHigh(tf, i); 
+                  Alarms[alarmCount].time=GetTime(tf, i); 
                   Alarms[alarmCount].type=1; 
                   Alarms[alarmCount].barIndex=i; 
                   alarmCount++; 
                } 
             } else { 
-               double rl=GetLow(c1); 
+               double rl=GetLow(tf, c1); 
                for(int k=1;k<=MaxScanDistance;k++){ 
                   int n=c1-k; 
-                  if(n<0||GetHigh(n)>GetHigh(i))break; 
-                  if(IsRed(n)&&IsStrongBody(n)&&GetClose(n)<rl){ 
+                  if(n<0||GetHigh(tf, n)>GetHigh(tf, i))break; 
+                  if(IsRed(tf, n)&&IsStrongBody(tf, n)&&GetClose(tf, n)<rl){ 
                      ArrayResize(Alarms,alarmCount+1); 
-                     Alarms[alarmCount].price=GetHigh(i); 
-                     Alarms[alarmCount].time=GetTime(i); 
+                     Alarms[alarmCount].price=GetHigh(tf, i); 
+                     Alarms[alarmCount].time=GetTime(tf, i); 
                      Alarms[alarmCount].type=1; 
                      Alarms[alarmCount].barIndex=i; 
                      alarmCount++; 
@@ -150,31 +145,31 @@ void UpdateZigZagMap() {
             } 
          } 
       } 
-      if (IsRed(i)) { 
+      if (IsRed(tf, i)) { 
          int c1=i-1; 
          int c2=i-2; 
-         if(IsGreen(c1)){ 
-            if(IsStrongBody(c1)){ 
+         if(IsGreen(tf, c1)){ 
+            if(IsStrongBody(tf, c1)){ 
                bool confirm = false; 
-               if(IsGreen(c2)) confirm = true; 
-               else if(GetClose(c2) > GetOpen(i)) confirm = true; 
+               if(IsGreen(tf, c2)) confirm = true; 
+               else if(GetClose(tf, c2) > GetOpen(tf, i)) confirm = true; 
                if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
-                  Alarms[alarmCount].price=GetLow(i); 
-                  Alarms[alarmCount].time=GetTime(i); 
+                  Alarms[alarmCount].price=GetLow(tf, i); 
+                  Alarms[alarmCount].time=GetTime(tf, i); 
                   Alarms[alarmCount].type=-1; 
                   Alarms[alarmCount].barIndex=i; 
                   alarmCount++; 
                } 
             } else { 
-               double rh=GetHigh(c1); 
+               double rh=GetHigh(tf, c1); 
                for(int k=1;k<=MaxScanDistance;k++){ 
                   int n=c1-k; 
-                  if(n<0||GetLow(n)<GetLow(i))break; 
-                  if(IsGreen(n)&&IsStrongBody(n)&&GetClose(n)>rh){ 
+                  if(n<0||GetLow(tf, n)<GetLow(tf, i))break; 
+                  if(IsGreen(tf, n)&&IsStrongBody(tf, n)&&GetClose(tf, n)>rh){ 
                      ArrayResize(Alarms,alarmCount+1); 
-                     Alarms[alarmCount].price=GetLow(i); 
-                     Alarms[alarmCount].time=GetTime(i); 
+                     Alarms[alarmCount].price=GetLow(tf, i); 
+                     Alarms[alarmCount].time=GetTime(tf, i); 
                      Alarms[alarmCount].type=-1; 
                      Alarms[alarmCount].barIndex=i; 
                      alarmCount++; 
@@ -186,17 +181,17 @@ void UpdateZigZagMap() {
       } 
    } 
    if (alarmCount < 2) return; 
-   ArrayResize(ZigZagPoints, 0); 
+   ArrayResize(targetPoints, 0); 
    int state = 0; 
    PointStruct pendingPoint; 
    int lastCommittedIndex = startBar + 5; 
    if (Alarms[0].type == 1) { 
-      AddPoint(ZigZagPoints, Alarms[0]); 
+      AddPoint(targetPoints, Alarms[0]); 
       lastCommittedIndex = Alarms[0].barIndex; 
       state = -1; 
       pendingPoint.price = 999999; 
    } else { 
-      AddPoint(ZigZagPoints, Alarms[0]); 
+      AddPoint(targetPoints, Alarms[0]); 
       lastCommittedIndex = Alarms[0].barIndex; 
       state = 1; 
       pendingPoint.price = 0; 
@@ -207,32 +202,32 @@ void UpdateZigZagMap() {
       int count = searchEnd - searchStart + 1; 
       if (count <= 0) continue; 
       if (state == 1) { 
-         int hI = iHighest(_Symbol, _Period, MODE_HIGH, count, searchStart); 
-         double hP = GetHigh(hI); 
+         int hI = iHighest(_Symbol, tf, MODE_HIGH, count, searchStart); 
+         double hP = GetHigh(tf, hI); 
          if (hP > pendingPoint.price) { 
             pendingPoint.price=hP; 
-            pendingPoint.time=GetTime(hI); 
+            pendingPoint.time=GetTime(tf, hI); 
             pendingPoint.barIndex=hI; 
             pendingPoint.type=1; 
          } 
          if (Alarms[i].type == -1) { 
-            AddPoint(ZigZagPoints, pendingPoint); 
+            AddPoint(targetPoints, pendingPoint); 
             lastCommittedIndex=pendingPoint.barIndex; 
             state=-1; 
             pendingPoint.price=999999; 
             i--; 
          } 
       } else if (state == -1) { 
-         int lI = iLowest(_Symbol, _Period, MODE_LOW, count, searchStart); 
-         double lP = GetLow(lI); 
+         int lI = iLowest(_Symbol, tf, MODE_LOW, count, searchStart); 
+         double lP = GetLow(tf, lI); 
          if (lP < pendingPoint.price) { 
             pendingPoint.price=lP; 
-            pendingPoint.time=GetTime(lI); 
+            pendingPoint.time=GetTime(tf, lI); 
             pendingPoint.barIndex=lI; 
             pendingPoint.type=-1; 
          } 
          if (Alarms[i].type == 1) { 
-            AddPoint(ZigZagPoints, pendingPoint); 
+            AddPoint(targetPoints, pendingPoint); 
             lastCommittedIndex=pendingPoint.barIndex; 
             state=1; 
             pendingPoint.price=0; 
@@ -240,7 +235,7 @@ void UpdateZigZagMap() {
          } 
       } 
    } 
-   for(int i=0; i<ArraySize(ZigZagPoints); i++) CalculateZoneLimits(ZigZagPoints[i]); 
-   CalculateTrendsAndLock(); 
-   DrawZigZagLines(); 
+   for(int i=0; i<ArraySize(targetPoints); i++) CalculateZoneLimits(tf, targetPoints[i]); 
+   CalculateTrendsAndLock(tf, targetPoints, targetTrend); 
+   DrawZigZagLines(suffix, targetPoints); 
 }

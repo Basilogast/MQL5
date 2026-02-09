@@ -3,12 +3,16 @@
 //+------------------------------------------------------------------+
 #property strict
 
-// --- ENUMS ---
 enum ENUM_REENTRY_MODE {
-   MODE_SINGLE   = 0, // One Trade Only (Conservative)
-   MODE_DOUBLE   = 1, // Two Trades (1st @ 1.0%, 2nd @ 0.5%) - DEFAULT
-   MODE_INFINITE = 2  // Infinite Trades (Aggressive)
+   MODE_SINGLE   = 0, 
+   MODE_DOUBLE   = 1, 
+   MODE_INFINITE = 2  
 };
+
+//--- 0. TIMEFRAME SETTINGS (FIXED)
+input group "Timeframe Settings"
+input ENUM_TIMEFRAMES TimeFrame_HTF = PERIOD_H1;  // High Timeframe (e.g. 1H)
+input ENUM_TIMEFRAMES TimeFrame_LTF = PERIOD_M15; // Low Timeframe (e.g. 15M)
 
 //--- 1. VISUAL SETTINGS
 input group "Visual Settings"
@@ -16,12 +20,11 @@ input int HistoryBars       = 5000;
 input int LineWidth         = 2;
 input bool DrawZones        = true;
 
-// ZONE COLORS (Fixed)
 color SupplyColor     = clrMaroon; 
 color DemandColor     = clrDarkGreen;
 color FlippedColor    = clrGray; 
 
-//--- 2. TREND COLORS (Fixed)
+//--- 2. TREND COLORS
 color ColorUp         = clrLimeGreen;
 color ColorDown       = clrRed;
 color ColorRange      = clrYellow;
@@ -60,12 +63,12 @@ input double TPZoneDepth     = 0.0;
 //--- 6. BUFFER SETTINGS
 input group "Buffer Logic"
 input bool   UseDynamicBuffer = false; 
-input double BaseBufferPoints = 45.0;  
+input double BaseBufferPoints = 45.0;
 input double MinBufferPoints  = 20;   
-input double MaxBufferPoints  = 200;  
+input double MaxBufferPoints  = 200;
 
 //--- 7. RISK MANAGEMENT
 input group "Risk Management"
 input bool   EnableProfitLocking = true;
-input double LockTriggerPercent  = 0.80; 
+input double LockTriggerPercent  = 0.80;
 input double LockPositionPercent = 0.70;

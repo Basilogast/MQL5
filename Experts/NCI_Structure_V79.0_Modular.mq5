@@ -28,11 +28,17 @@ int OnInit()
    ObjectsDeleteAll(0, "NCI_Zone_");
    ObjectsDeleteAll(0, "NCI_Flip_");
    
-   // --- CRITICAL FIX: Run BOTH calculations on startup ---
-   UpdateZigZagMap();   // 1. Calculate Points
-   DrawParallelZones(); // 2. Draw Zones & Update Logic State
+   // --- 1. Update HTF (H1) Logic ---
+   // We pass the H1 variables so they get filled with H1 data
+   UpdateZigZagMap(TimeFrame_HTF, ZigZagPoints_HTF, currentMarketTrend_HTF, "_HTF");
+   DrawParallelZones(TimeFrame_HTF, ZigZagPoints_HTF, activeSupply_HTF, activeDemand_HTF, activeFlippedSupply_HTF, activeFlippedDemand_HTF, "_HTF");
+
+   // --- 2. Update LTF (M15) Logic ---
+   // We pass the M15 variables so they get filled with M15 data
+   UpdateZigZagMap(TimeFrame_LTF, ZigZagPoints_LTF, currentMarketTrend_LTF, "_LTF");
+   DrawParallelZones(TimeFrame_LTF, ZigZagPoints_LTF, activeSupply_LTF, activeDemand_LTF, activeFlippedSupply_LTF, activeFlippedDemand_LTF, "_LTF");
    
-   Print(">>> V79.0 MODULAR INIT: System Loaded Successfully.");
+   Print(">>> V79.0 DUAL TIMEFRAME INIT: Loaded Successfully.");
    return(INIT_SUCCEEDED);
 }
 
@@ -44,12 +50,17 @@ void OnTick()
    ManageTradeState();       
    ManageOpenPositions();    
    
-   // --- CRITICAL FIX: Run BOTH calculations on new bar ---
    if(IsNewBar()) {
-      UpdateZigZagMap();   // 1. Calculate new ZigZag points
-      DrawParallelZones(); // 2. Update Zones based on new points
+      // Refresh HTF (H1)
+      UpdateZigZagMap(TimeFrame_HTF, ZigZagPoints_HTF, currentMarketTrend_HTF, "_HTF");
+      DrawParallelZones(TimeFrame_HTF, ZigZagPoints_HTF, activeSupply_HTF, activeDemand_HTF, activeFlippedSupply_HTF, activeFlippedDemand_HTF, "_HTF");
+      
+      // Refresh LTF (M15)
+      UpdateZigZagMap(TimeFrame_LTF, ZigZagPoints_LTF, currentMarketTrend_LTF, "_LTF");
+      DrawParallelZones(TimeFrame_LTF, ZigZagPoints_LTF, activeSupply_LTF, activeDemand_LTF, activeFlippedSupply_LTF, activeFlippedDemand_LTF, "_LTF");
    }
-   
+
+   // CheckTradeEntry now looks at BOTH lists inside NCI_Trade.mqh
    if(AllowTrading) CheckTradeEntry();
 }
 //+------------------------------------------------------------------+
