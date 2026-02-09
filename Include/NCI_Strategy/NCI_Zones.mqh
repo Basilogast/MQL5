@@ -95,7 +95,8 @@ void DrawParallelZones() {
             // Use Strict Helper Logic for Breakout
             datetime preciseBreakTime = FindBreakoutTime(supply.lastBarIndex, p.barIndex, supply.top, 1);
             
-            if (p.price > supply.top && preciseBreakTime == 0) preciseBreakTime = p.time; // Gap protection
+            // REMOVED: Gap Protection (ZigZag wick override)
+            // if (p.price > supply.top && preciseBreakTime == 0) preciseBreakTime = p.time; 
 
             if (preciseBreakTime > 0) { 
                DrawSingleZone(supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1); 
@@ -152,7 +153,8 @@ void DrawParallelZones() {
          else { 
             datetime preciseBreakTime = FindBreakoutTime(demand.lastBarIndex, p.barIndex, demand.bottom, -1);
             
-            if (p.price < demand.bottom && preciseBreakTime == 0) preciseBreakTime = p.time; // Gap protection
+            // REMOVED: Gap Protection (ZigZag wick override)
+            // if (p.price < demand.bottom && preciseBreakTime == 0) preciseBreakTime = p.time; 
 
             if (preciseBreakTime > 0) { 
                DrawSingleZone(demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1); 
@@ -216,7 +218,6 @@ void DrawParallelZones() {
       
       if(deadTime > 0) {
          supply.isActive = false;
-         // Draw it as dead ending at the confirmation candle
          DrawSingleZone(supply.startTime, deadTime, supply.top, supply.bottom, 1, 999991); 
       }
    }
