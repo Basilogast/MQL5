@@ -6,7 +6,7 @@
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh"
 
-// Pass Timeframe and Target Array
+// [Keep CalculateTrendsAndLock ... unchanged]
 void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &marketTrend) { 
    int count = ArraySize(points); 
    if (count < 2) return; 
@@ -44,6 +44,7 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
    marketTrend = runningTrend; 
 }
 
+// [Keep CalculateZoneLimits ... unchanged]
 void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) { 
    p.zoneLimitTop = p.price; 
    p.zoneLimitBottom = p.price; 
@@ -84,8 +85,15 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
    } 
 }
 
+// *** VISUAL UPDATE: Respect Dashboard Flags ***
 void DrawZigZagLines(string suffix, PointStruct &points[]) { 
+   // 1. Clear old objects regardless of state
    ObjectsDeleteAll(0, "NCI_ZZ_" + suffix); 
+   
+   // 2. Check if this layer is disabled via Dashboard
+   if (suffix == "_HTF" && !ShowHTF) return;
+   if (suffix == "_LTF" && !ShowLTF) return;
+
    int c=ArraySize(points); 
    if(c<2)return; 
    
@@ -104,6 +112,7 @@ void DrawZigZagLines(string suffix, PointStruct &points[]) {
    ChartRedraw(); 
 }
 
+// [Keep UpdateZigZagMap ... unchanged]
 void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targetTrend, string suffix) { 
    int totalBars = Bars(_Symbol, tf); 
    if (totalBars < 500) return; 

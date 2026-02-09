@@ -17,14 +17,25 @@ void MergeZone(MergedZoneState &state, PointStruct &p, int type) {
    state.startTime = p.time; state.lastBarIndex = p.barIndex; 
 }
 
+// *** UPDATED: VISUAL TOGGLE CHECK ***
 void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double bottom, int type, int id) { 
    if (top <= bottom) return; 
+   
+   // --- DASHBOARD CHECK ---
+   if (suffix == "_HTF" && !ShowHTF) return;
+   if (suffix == "_LTF" && !ShowLTF) return;
+
    string name = "NCI_Zone_" + suffix + IntegerToString(id) + "_" + TimeToString(t1); 
    color c = (type == 1) ? SupplyColor : DemandColor; 
    if(ObjectFind(0,name)<0) { ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bottom); ObjectSetInteger(0, name, OBJPROP_COLOR, c); ObjectSetInteger(0, name, OBJPROP_FILL, true); ObjectSetInteger(0, name, OBJPROP_BACK, true); ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); } 
 }
 
+// *** UPDATED: VISUAL TOGGLE CHECK ***
 void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
+   // --- DASHBOARD CHECK ---
+   if (suffix == "_HTF" && !ShowHTF) return;
+   if (suffix == "_LTF" && !ShowLTF) return;
+
    string name = "NCI_Flip_" + suffix + TimeToString(state.startTime);
    if(ObjectFind(0,name)<0) {
       ObjectCreate(0, name, OBJ_RECTANGLE, 0, state.startTime, state.top, endTime, state.bottom);
@@ -36,6 +47,7 @@ void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
    }
 }
 
+// [Keep Logic Functions: FindFutureTarget, CheckZoneLife ... unchanged]
 double FindFutureTarget(PointStruct &points[], int currentIndex, int targetType, double referencePrice)
 {
    int totalPoints = ArraySize(points);
@@ -67,8 +79,9 @@ datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double target
    return 0; 
 }
 
-// UNIVERSAL DRAW FUNCTION
+// *** UPDATED: CLEAR OLD OBJECTS BEFORE DRAWING ***
 void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneState &activeSup, MergedZoneState &activeDem, MergedZoneState &activeFlipSup, MergedZoneState &activeFlipDem, string suffix) { 
+   // 1. Clear old objects regardless of state (so they vanish if toggled OFF)
    ObjectsDeleteAll(0, "NCI_Zone_" + suffix);
    ObjectsDeleteAll(0, "NCI_Flip_" + suffix); 
    
