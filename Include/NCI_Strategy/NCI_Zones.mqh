@@ -3,7 +3,6 @@
 //+------------------------------------------------------------------+
 #property strict
 
-// Includes
 #include "NCI_Constants.mqh"
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh"
@@ -40,69 +39,39 @@ void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
 
 // --- LOGIC FUNCTIONS ---
 
-// *** 1. FUTURE TARGET SCANNER (Wait for Pullback) ***
-// We look FORWARD from the current index to find the NEXT zone that will form.
-// If no future zone exists yet, this returns 0 (Keeping the Gray Zone in "Semi-Immortal" state).
+// 1. FUTURE TARGET SCANNER
 double FindFutureTarget(int currentIndex, int targetType, double referencePrice)
 {
    int totalPoints = ArraySize(ZigZagPoints);
-   
-   // Scan FORWARD into the future (i + 1)
    for(int k = currentIndex + 1; k < totalPoints; k++) 
    {
       if (ZigZagPoints[k].type == targetType) {
-         
          if (targetType == 1) { 
-            // BUYING: Looking for a FUTURE Supply Zone
-            // It must be ABOVE our entry (Valid Profit Target)
-            if (ZigZagPoints[k].zoneLimitBottom > referencePrice) {
-               return ZigZagPoints[k].zoneLimitTop; // Return the Far Side (Ceiling)
-            }
+            if (ZigZagPoints[k].zoneLimitBottom > referencePrice) return ZigZagPoints[k].zoneLimitTop; 
          }
-         
          if (targetType == -1) { 
-            // SELLING: Looking for a FUTURE Demand Zone
-            // It must be BELOW our entry (Valid Profit Target)
-            if (ZigZagPoints[k].zoneLimitTop < referencePrice) {
-               return ZigZagPoints[k].zoneLimitBottom; // Return the Far Side (Floor)
-            }
+            if (ZigZagPoints[k].zoneLimitTop < referencePrice) return ZigZagPoints[k].zoneLimitBottom; 
          }
       }
    }
-   return 0; // No future target formed yet -> Phase 1 (Semi-Immortal)
+   return 0; 
 }
 
-// *** 2. CHECK LIFE (LIVING RANGE) ***
+// 2. CHECK LIFE
 datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel)
 {
    for(int i = startBar - 1; i > 0; i--) 
    {
-      // --- A. PROFIT SIDE (Only if a Future Target exists) ---
-      // If targetLevel is 0 (Phase 1), this block is SKIPPED.
-      // The Zone is IMMORTAL to profit moves during Phase 1.
+      // A. Profit Side (Future Target Breakout)
       if (targetLevel != 0) {
-          if (type == 1) { 
-             // Buy Trade: Did we Break UP through the Future Supply Top?
-             if (CheckForBreakout(i+1, i, targetLevel, 1)) return GetTime(i); 
-          } 
-          else { 
-             // Sell Trade: Did we Break DOWN through the Future Demand Bottom?
-             if (CheckForBreakout(i+1, i, targetLevel, -1)) return GetTime(i); 
-          }
+          if (type == 1) { if (CheckForBreakout(i+1, i, targetLevel, 1)) return GetTime(i); } 
+          else { if (CheckForBreakout(i+1, i, targetLevel, -1)) return GetTime(i); }
       }
-
-      // --- B. LOSS SIDE (Always Active) ---
-      // Even in Phase 1 (Semi-Immortal), the zone CAN die if it fails self-break.
-      if (type == 1) { 
-          // Buy Trade: Did we Break DOWN through Support?
-          if (CheckForBreakout(i+1, i, selfBreakLevel, -1)) return GetTime(i); 
-      } 
-      else { 
-          // Sell Trade: Did we Break UP through Resistance?
-          if (CheckForBreakout(i+1, i, selfBreakLevel, 1)) return GetTime(i); 
-      }
+      // B. Loss Side (Self Breakout)
+      if (type == 1) { if (CheckForBreakout(i+1, i, selfBreakLevel, -1)) return GetTime(i); } 
+      else { if (CheckForBreakout(i+1, i, selfBreakLevel, 1)) return GetTime(i); }
    }
-   return 0; // Zone stays alive
+   return 0; 
 }
 
 void DrawParallelZones() { 
@@ -121,7 +90,7 @@ void DrawParallelZones() {
    for (int i = 0; i < count; i++) { 
       PointStruct p = ZigZagPoints[i]; 
       
-      if (p.type == 1) { // SUPPLY ZONE LOGIC
+      if (p.type == 1) { // SUPPLY ZONE
          if (!supply.isActive) StartZone(supply, p); 
          else { 
             bool isBroken = CheckForBreakout(supply.lastBarIndex, p.barIndex, supply.top, 1);
@@ -134,27 +103,51 @@ void DrawParallelZones() {
                DrawSingleZone(supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1); 
                
                if (p.assignedTrend != 1) { 
+                   // *** TOTAL HIGHLANDER with ZOMBIE FIX ***
+                   
+                   // 1. Kill old Buy Zone (Flipped Demand)
+                   if (activeFlippedDemand.isActive) {
+                       datetime end = preciseBreakTime;
+                       // FIX: If it died naturally EARLIER, respect the dead.
+                       if (activeFlippedDemand.endTime > 0 && activeFlippedDemand.endTime < preciseBreakTime) {
+                           end = activeFlippedDemand.endTime;
+                       }
+                       DrawFlippedZone(activeFlippedDemand, end); 
+                       activeFlippedDemand.isActive = false; 
+                   }
+                   
+                   // 2. Kill old Sell Zone (Flipped Supply)
+                   if (activeFlippedSupply.isActive) {
+                       datetime end = preciseBreakTime;
+                       // FIX: If it died naturally EARLIER, respect the dead.
+                       if (activeFlippedSupply.endTime > 0 && activeFlippedSupply.endTime < preciseBreakTime) {
+                           end = activeFlippedSupply.endTime;
+                       }
+                       DrawFlippedZone(activeFlippedSupply, end); 
+                       activeFlippedSupply.isActive = false; 
+                   }
+
                    MergedZoneState flip = supply;
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
-                   // *** USE FUTURE TARGET SCANNER ***
-                   // If no pullback yet, futureTarget = 0.
                    double futureTarget = FindFutureTarget(i, 1, supply.top); 
-                   
                    datetime deathTime = CheckZoneLife(p.barIndex, 1, futureTarget, supply.bottom);
                    
+                   // Always register as active (so future zones can see it)
+                   activeFlippedDemand = flip;
+                   
                    if (deathTime == 0) {
-                      activeFlippedDemand = flip;
                       activeFlippedDemand.endTime = 0; 
                       DrawFlippedZone(flip, TimeCurrent()+PeriodSeconds()*50); 
                    } else {
+                      activeFlippedDemand.endTime = deathTime; // Record natural death time
                       DrawFlippedZone(flip, deathTime); 
                    }
                }
                StartZone(supply, p); 
             } else { 
-               // Standard Merge Logic
+               // Merge Logic
                bool shouldMerge = false; 
                if (p.zoneLimitTop > supply.top) shouldMerge = true; 
                else { 
@@ -171,7 +164,7 @@ void DrawParallelZones() {
             } 
          } 
       } 
-      else if (p.type == -1) { // DEMAND ZONE LOGIC
+      else if (p.type == -1) { // DEMAND ZONE
          if (!demand.isActive) StartZone(demand, p); 
          else { 
             bool isBroken = CheckForBreakout(demand.lastBarIndex, p.barIndex, demand.bottom, -1);
@@ -184,27 +177,49 @@ void DrawParallelZones() {
                DrawSingleZone(demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1); 
                
                if (p.assignedTrend != -1) { 
+                   // *** TOTAL HIGHLANDER with ZOMBIE FIX ***
+                   
+                   // 1. Kill old Buy Zone
+                   if (activeFlippedDemand.isActive) {
+                       datetime end = preciseBreakTime;
+                       if (activeFlippedDemand.endTime > 0 && activeFlippedDemand.endTime < preciseBreakTime) {
+                           end = activeFlippedDemand.endTime;
+                       }
+                       DrawFlippedZone(activeFlippedDemand, end); 
+                       activeFlippedDemand.isActive = false; 
+                   }
+                   
+                   // 2. Kill old Sell Zone
+                   if (activeFlippedSupply.isActive) {
+                       datetime end = preciseBreakTime;
+                       if (activeFlippedSupply.endTime > 0 && activeFlippedSupply.endTime < preciseBreakTime) {
+                           end = activeFlippedSupply.endTime;
+                       }
+                       DrawFlippedZone(activeFlippedSupply, end); 
+                       activeFlippedSupply.isActive = false; 
+                   }
+
                    MergedZoneState flip = demand;
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
-                   // *** USE FUTURE TARGET SCANNER ***
-                   // If no pullback yet, futureTarget = 0.
                    double futureTarget = FindFutureTarget(i, -1, demand.bottom); 
-                   
                    datetime deathTime = CheckZoneLife(p.barIndex, -1, futureTarget, demand.top);
                    
+                   // Always register as active
+                   activeFlippedSupply = flip;
+
                    if (deathTime == 0) {
-                      activeFlippedSupply = flip;
                       activeFlippedSupply.endTime = 0; 
                       DrawFlippedZone(flip, TimeCurrent()+PeriodSeconds()*50); 
                    } else {
+                      activeFlippedSupply.endTime = deathTime; // Record natural death time
                       DrawFlippedZone(flip, deathTime); 
                    }
                }
                StartZone(demand, p); 
             } else { 
-               // Standard Merge Logic
+               // Merge Logic
                bool shouldMerge = false; 
                if (p.zoneLimitBottom < demand.bottom) shouldMerge = true; 
                else { 
