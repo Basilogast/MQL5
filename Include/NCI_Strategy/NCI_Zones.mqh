@@ -40,48 +40,59 @@ void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
 
 // --- LOGIC FUNCTIONS ---
 
-// *** 1. FIND TARGET (FAR SIDE) ***
-double FindNextTarget(int currentIndex, int targetType, double referencePrice)
+// *** 1. FUTURE TARGET SCANNER (Wait for Pullback) ***
+// We look FORWARD from the current index to find the NEXT zone that will form.
+// If no future zone exists yet, this returns 0 (Keeping the Gray Zone in "Semi-Immortal" state).
+double FindFutureTarget(int currentIndex, int targetType, double referencePrice)
 {
-   // Retro-Scan: Look backwards for structure
-   for(int k = currentIndex - 1; k >= 0; k--) 
+   int totalPoints = ArraySize(ZigZagPoints);
+   
+   // Scan FORWARD into the future (i + 1)
+   for(int k = currentIndex + 1; k < totalPoints; k++) 
    {
       if (ZigZagPoints[k].type == targetType) {
+         
          if (targetType == 1) { 
-            // BUYING: Target is Supply.
-            // Condition 1: Supply must be ABOVE our entry (Reference).
-            // Condition 2: Return the TOP of Supply (Far Side) for breakout check.
-            if (ZigZagPoints[k].zoneLimitBottom > referencePrice) return ZigZagPoints[k].zoneLimitTop; 
+            // BUYING: Looking for a FUTURE Supply Zone
+            // It must be ABOVE our entry (Valid Profit Target)
+            if (ZigZagPoints[k].zoneLimitBottom > referencePrice) {
+               return ZigZagPoints[k].zoneLimitTop; // Return the Far Side (Ceiling)
+            }
          }
+         
          if (targetType == -1) { 
-            // SELLING: Target is Demand.
-            // Condition 1: Demand must be BELOW our entry (Reference).
-            // Condition 2: Return the BOTTOM of Demand (Far Side) for breakout check.
-            if (ZigZagPoints[k].zoneLimitTop < referencePrice) return ZigZagPoints[k].zoneLimitBottom;   
+            // SELLING: Looking for a FUTURE Demand Zone
+            // It must be BELOW our entry (Valid Profit Target)
+            if (ZigZagPoints[k].zoneLimitTop < referencePrice) {
+               return ZigZagPoints[k].zoneLimitBottom; // Return the Far Side (Floor)
+            }
          }
       }
    }
-   return 0; // No valid target found
+   return 0; // No future target formed yet -> Phase 1 (Semi-Immortal)
 }
 
-// *** 2. CHECK LIFE (STRICT BREAKOUT ON BOTH SIDES) ***
+// *** 2. CHECK LIFE (LIVING RANGE) ***
 datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel)
 {
    for(int i = startBar - 1; i > 0; i--) 
    {
-      // --- A. PROFIT SIDE (TARGET BREAKOUT) ---
+      // --- A. PROFIT SIDE (Only if a Future Target exists) ---
+      // If targetLevel is 0 (Phase 1), this block is SKIPPED.
+      // The Zone is IMMORTAL to profit moves during Phase 1.
       if (targetLevel != 0) {
           if (type == 1) { 
-             // Buy Trade: Did we Break UP through the Supply Top?
+             // Buy Trade: Did we Break UP through the Future Supply Top?
              if (CheckForBreakout(i+1, i, targetLevel, 1)) return GetTime(i); 
           } 
           else { 
-             // Sell Trade: Did we Break DOWN through the Demand Bottom?
+             // Sell Trade: Did we Break DOWN through the Future Demand Bottom?
              if (CheckForBreakout(i+1, i, targetLevel, -1)) return GetTime(i); 
           }
       }
 
-      // --- B. LOSS SIDE (SELF BREAKOUT) ---
+      // --- B. LOSS SIDE (Always Active) ---
+      // Even in Phase 1 (Semi-Immortal), the zone CAN die if it fails self-break.
       if (type == 1) { 
           // Buy Trade: Did we Break DOWN through Support?
           if (CheckForBreakout(i+1, i, selfBreakLevel, -1)) return GetTime(i); 
@@ -91,7 +102,7 @@ datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBr
           if (CheckForBreakout(i+1, i, selfBreakLevel, 1)) return GetTime(i); 
       }
    }
-   return 0; // Zone is still alive
+   return 0; // Zone stays alive
 }
 
 void DrawParallelZones() { 
@@ -127,11 +138,11 @@ void DrawParallelZones() {
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
-                   // Find Target (Top of next Supply)
-                   double histTarget = FindNextTarget(i, 1, supply.top); 
+                   // *** USE FUTURE TARGET SCANNER ***
+                   // If no pullback yet, futureTarget = 0.
+                   double futureTarget = FindFutureTarget(i, 1, supply.top); 
                    
-                   // Check Life (Break Supply Top OR Break Self Bottom)
-                   datetime deathTime = CheckZoneLife(p.barIndex, 1, histTarget, supply.bottom);
+                   datetime deathTime = CheckZoneLife(p.barIndex, 1, futureTarget, supply.bottom);
                    
                    if (deathTime == 0) {
                       activeFlippedDemand = flip;
@@ -143,6 +154,7 @@ void DrawParallelZones() {
                }
                StartZone(supply, p); 
             } else { 
+               // Standard Merge Logic
                bool shouldMerge = false; 
                if (p.zoneLimitTop > supply.top) shouldMerge = true; 
                else { 
@@ -176,11 +188,11 @@ void DrawParallelZones() {
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
-                   // Find Target (Bottom of next Demand)
-                   double histTarget = FindNextTarget(i, -1, demand.bottom); 
+                   // *** USE FUTURE TARGET SCANNER ***
+                   // If no pullback yet, futureTarget = 0.
+                   double futureTarget = FindFutureTarget(i, -1, demand.bottom); 
                    
-                   // Check Life (Break Demand Bottom OR Break Self Top)
-                   datetime deathTime = CheckZoneLife(p.barIndex, -1, histTarget, demand.top);
+                   datetime deathTime = CheckZoneLife(p.barIndex, -1, futureTarget, demand.top);
                    
                    if (deathTime == 0) {
                       activeFlippedSupply = flip;
@@ -192,6 +204,7 @@ void DrawParallelZones() {
                }
                StartZone(demand, p); 
             } else { 
+               // Standard Merge Logic
                bool shouldMerge = false; 
                if (p.zoneLimitBottom < demand.bottom) shouldMerge = true; 
                else { 
