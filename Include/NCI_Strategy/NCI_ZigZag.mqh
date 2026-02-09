@@ -3,7 +3,6 @@
 //+------------------------------------------------------------------+
 #property strict
 
-// *** CRITICAL FIX: Include dependencies ***
 #include "NCI_Constants.mqh"
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh"
@@ -23,13 +22,23 @@ void CalculateTrendsAndLock() {
       
       bool brokenSupply = false; bool brokenDemand = false; 
       
+      // *** CRITICAL FIX: Use Strict 2-Candle Logic for Line Coloring ***
+      
       if (lastSupplyIdx != -1) {
+          // OLD LOGIC (Simple Touch):
+          // if (p.price > lastSupplyLevel) brokenSupply = true; 
+          
+          // NEW LOGIC (Strict Close):
+          // We check if strict breakout rules were met between creation and now.
           brokenSupply = CheckForBreakout(lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
-          if (p.price > lastSupplyLevel) brokenSupply = true; 
       }
+      
       if (lastDemandIdx != -1) {
+          // OLD LOGIC (Simple Touch):
+          // if (p.price < lastDemandLevel) brokenDemand = true; 
+          
+          // NEW LOGIC (Strict Close):
           brokenDemand = CheckForBreakout(lastDemandIdx, p.barIndex, lastDemandLevel, -1);
-          if (p.price < lastDemandLevel) brokenDemand = true; 
       }
 
       if (runningTrend == -1) { if (brokenSupply) runningTrend = 0; } 
@@ -50,9 +59,9 @@ void CalculateZoneLimits(PointStruct &p) {
    p.zoneLimitBottom = p.price; 
    if (p.type == 1) { 
       int gI=-1, rI=-1; 
-      for(int k=0;k<=5;k++){
+      for(int k=0;k<=5;k++){ 
          if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
-         if(IsGreen(p.barIndex+k)){gI=p.barIndex+k;break;}
+         if(IsGreen(p.barIndex+k)){gI=p.barIndex+k;break;} 
       } 
       if(gI!=-1) rI=gI-1; 
       if(gI!=-1) { 
@@ -66,9 +75,9 @@ void CalculateZoneLimits(PointStruct &p) {
       } 
    } else { 
       int rI=-1, gI=-1; 
-      for(int k=0;k<=5;k++){
+      for(int k=0;k<=5;k++){ 
          if(p.barIndex+k >= Bars(_Symbol,_Period)) break; 
-         if(IsRed(p.barIndex+k)){rI=p.barIndex+k;break;}
+         if(IsRed(p.barIndex+k)){rI=p.barIndex+k;break;} 
       } 
       if(rI!=-1) gI=rI-1; 
       if(rI!=-1) { 
@@ -108,11 +117,12 @@ void UpdateZigZagMap() {
    int startBar = MathMin(HistoryBars, totalBars - 10); 
    for (int i = startBar; i >= 5; i--) { 
       if (IsGreen(i)) { 
-         int c1=i-1; int c2=i-2; 
+         int c1=i-1; 
+         int c2=i-2; 
          if(IsRed(c1)){ 
             if(IsStrongBody(c1)){ 
-               bool confirm = false;
-               if(IsRed(c2)) confirm = true;
+               bool confirm = false; 
+               if(IsRed(c2)) confirm = true; 
                else if(GetClose(c2) < GetOpen(i)) confirm = true; 
                if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
@@ -134,19 +144,20 @@ void UpdateZigZagMap() {
                      Alarms[alarmCount].type=1; 
                      Alarms[alarmCount].barIndex=i; 
                      alarmCount++; 
-                     break;
+                     break; 
                   } 
                } 
             } 
          } 
       } 
       if (IsRed(i)) { 
-         int c1=i-1; int c2=i-2; 
+         int c1=i-1; 
+         int c2=i-2; 
          if(IsGreen(c1)){ 
             if(IsStrongBody(c1)){ 
-               bool confirm = false;
-               if(IsGreen(c2)) confirm = true;
-               else if(GetClose(c2) > GetOpen(i)) confirm = true;
+               bool confirm = false; 
+               if(IsGreen(c2)) confirm = true; 
+               else if(GetClose(c2) > GetOpen(i)) confirm = true; 
                if(confirm) { 
                   ArrayResize(Alarms,alarmCount+1); 
                   Alarms[alarmCount].price=GetLow(i); 
@@ -167,7 +178,7 @@ void UpdateZigZagMap() {
                      Alarms[alarmCount].type=-1; 
                      Alarms[alarmCount].barIndex=i; 
                      alarmCount++; 
-                     break;
+                     break; 
                   } 
                } 
             } 

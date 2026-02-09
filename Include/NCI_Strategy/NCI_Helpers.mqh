@@ -38,7 +38,7 @@ datetime GetTime(int index) {
 bool IsGreen(int index) { return GetClose(index)>GetOpen(index); }
 bool IsRed(int index) { return GetClose(index)<GetOpen(index); }
 
-// *** NEW: Marubozu Check ***
+// *** UPDATED: Marubozu Check (>= 60%) ***
 bool IsMarubozu(int index) {
    double high = GetHigh(index);
    double low = GetLow(index);
@@ -46,7 +46,9 @@ bool IsMarubozu(int index) {
    if (range == 0) return false;
    
    double body = MathAbs(GetOpen(index) - GetClose(index));
-   return (body / range) > 0.80; 
+   
+   // NEW LOGIC: Body must be >= 60% of total range
+   return (body / range) >= 0.60; 
 }
 
 bool IsStrongBody(int index) { 
@@ -92,7 +94,7 @@ void AddPoint(PointStruct &arr[], PointStruct &p) {
    ArrayResize(arr,s+1); arr[s]=p; 
 }
 
-// *** UPDATED: STRICT BREAKOUT LOGIC ***
+// *** STRICT BREAKOUT LOGIC ***
 bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) { 
    for (int i = startBarIdx - 1; i >= endBarIdx; i--) { 
       if (i-1 < 0) return false;
@@ -123,7 +125,7 @@ bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) {
    return false;
 }
 
-// *** UPDATED: TIMING HELPER ***
+// *** TIMING HELPER ***
 datetime FindBreakoutTime(int startBar, int endBar, double level, int type) {
    for (int i = startBar - 1; i >= endBar; i--) {
        if (i-1 < 0) return 0;
