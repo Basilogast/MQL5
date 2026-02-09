@@ -3,9 +3,9 @@
 //+------------------------------------------------------------------+
 #property strict
 
-// *** CRITICAL FIX: Include Structs so this file knows what PointStruct is ***
+// Includes
 #include "NCI_Structs.mqh" 
-#include "NCI_Constants.mqh" // Include constants for inputs like MinBodyPercent
+#include "NCI_Constants.mqh"
 
 // --- DATA WRAPPERS ---
 double GetHigh(int index) {
@@ -97,14 +97,28 @@ bool CheckForBreakout(int startBarIdx, int endBarIdx, double level, int type) {
    return false; 
 }
 
-// *** TIMING HELPER ***
+// *** UPDATED: TIMING HELPER (Now uses Strict Confirmation) ***
 datetime FindBreakoutTime(int startBar, int endBar, double level, int type) {
    for (int i = startBar - 1; i >= endBar; i--) {
-       if (i < 0) return 0;
-       if (type == 1) { 
-           if (GetClose(i) > level) return GetTime(i);
-       } else { 
-           if (GetClose(i) < level) return GetTime(i);
+       if (i-1 < 0) return 0; // Ensure we have space for the 2nd candle
+       
+       if (type == 1) { // Supply Break (Up)
+           double c1 = GetClose(i);     // 1st Candle (The Break)
+           double c2 = GetClose(i-1);   // 2nd Candle (The Confirmation)
+           
+           // Strict Momentum Rule: Both above level, 2nd higher than 1st
+           if (c1 > level && c2 > level && c2 > c1) {
+               return GetTime(i-1); // Return TIME of CONFIRMATION (2nd Candle)
+           }
+       } 
+       else { // Demand Break (Down)
+           double c1 = GetClose(i);     // 1st Candle (The Break)
+           double c2 = GetClose(i-1);   // 2nd Candle (The Confirmation)
+           
+           // Strict Momentum Rule: Both below level, 2nd lower than 1st
+           if (c1 < level && c2 < level && c2 < c1) {
+               return GetTime(i-1); // Return TIME of CONFIRMATION (2nd Candle)
+           }
        }
    }
    return 0;

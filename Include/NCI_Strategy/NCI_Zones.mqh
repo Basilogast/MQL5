@@ -39,32 +39,52 @@ void DrawFlippedZone(MergedZoneState &state, datetime endTime) {
 }
 
 // --- LOGIC FUNCTIONS ---
-double FindNextTarget(int currentIndex, int targetType)
+
+// Directional Target Finder (Filters out "Wrong Way" targets)
+double FindNextTarget(int currentIndex, int targetType, double referencePrice)
 {
-   // RETRO-SCAN: Look BACKWARDS for past structure
    for(int k = currentIndex - 1; k >= 0; k--) 
    {
       if (ZigZagPoints[k].type == targetType) {
-         if (targetType == 1) return ZigZagPoints[k].zoneLimitBottom; 
-         if (targetType == -1) return ZigZagPoints[k].zoneLimitTop;   
+         if (targetType == 1) { 
+            // Buying: Target must be ABOVE the breakout level
+            if (ZigZagPoints[k].zoneLimitBottom > referencePrice) return ZigZagPoints[k].zoneLimitBottom; 
+         }
+         if (targetType == -1) { 
+            // Selling: Target must be BELOW the breakout level
+            if (ZigZagPoints[k].zoneLimitTop < referencePrice) return ZigZagPoints[k].zoneLimitTop;   
+         }
       }
    }
    return 0; 
 }
 
+// *** UPDATED: STRICT RULES FOR BOTH TARGET AND FAILURE ***
 datetime CheckZoneLife(int startBar, int type, double targetLevel, double selfBreakLevel)
 {
    for(int i = startBar - 1; i > 0; i--) 
    {
-      double close = GetClose(i);
-      // 1. Target Hit (Simple)
+      // 1. Target Hit (NOW STRICT MOMENTUM)
+      // "type == 1" means Buy Zone (Flipped Demand). We win if price breaks UP through Resistance (Target).
       if (targetLevel != 0) {
-          if (type == 1) { if (close > targetLevel) return GetTime(i); } 
-          else { if (close < targetLevel) return GetTime(i); }
+          if (type == 1) { 
+             // Check for Strong Break UP through Target
+             if (CheckForBreakout(i+1, i, targetLevel, 1)) return GetTime(i); 
+          } 
+          else { 
+             // Check for Strong Break DOWN through Target
+             if (CheckForBreakout(i+1, i, targetLevel, -1)) return GetTime(i); 
+          }
       }
-      // 2. Self Break (Strict)
-      if (type == 1) { if (CheckForBreakout(i+1, i, selfBreakLevel, -1)) return GetTime(i); } 
-      else { if (CheckForBreakout(i+1, i, selfBreakLevel, 1)) return GetTime(i); }
+
+      // 2. Self Break (Strict Momentum) - Existing Logic
+      // "type == 1" means Buy Zone. We lose if price breaks DOWN through Self (Support).
+      if (type == 1) { 
+          if (CheckForBreakout(i+1, i, selfBreakLevel, -1)) return GetTime(i); 
+      } 
+      else { 
+          if (CheckForBreakout(i+1, i, selfBreakLevel, 1)) return GetTime(i); 
+      }
    }
    return 0; 
 }
@@ -73,14 +93,12 @@ void DrawParallelZones() {
    ObjectsDeleteAll(0, "NCI_Zone_");
    ObjectsDeleteAll(0, "NCI_Flip_"); 
    
-   // Reset Flipped Globals
    activeFlippedSupply.isActive = false; 
    activeFlippedDemand.isActive = false; 
    
    int count = ArraySize(ZigZagPoints); 
    if (count == 0) return; 
    
-   // Local State Variables
    MergedZoneState supply; supply.isActive = false; 
    MergedZoneState demand; demand.isActive = false; 
    
@@ -104,7 +122,7 @@ void DrawParallelZones() {
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
-                   double histTarget = FindNextTarget(i, 1); 
+                   double histTarget = FindNextTarget(i, 1, supply.top); 
                    datetime deathTime = CheckZoneLife(p.barIndex, 1, histTarget, supply.bottom);
                    
                    if (deathTime == 0) {
@@ -150,7 +168,7 @@ void DrawParallelZones() {
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    
-                   double histTarget = FindNextTarget(i, -1); 
+                   double histTarget = FindNextTarget(i, -1, demand.bottom); 
                    datetime deathTime = CheckZoneLife(p.barIndex, -1, histTarget, demand.top);
                    
                    if (deathTime == 0) {
@@ -181,13 +199,11 @@ void DrawParallelZones() {
       } 
    } 
    
-   // Draw Live Zones
    if (supply.isActive) DrawSingleZone(supply.startTime, TimeCurrent()+PeriodSeconds()*50, supply.top, supply.bottom, 1, 999991); 
    if (demand.isActive) DrawSingleZone(demand.startTime, TimeCurrent()+PeriodSeconds()*50, demand.top, demand.bottom, -1, 999992); 
    
-   // *** CRITICAL FIX: UPDATE GLOBAL STATE FOR TRADING LOGIC ***
-   activeSupply = supply;
-   activeDemand = demand;
+   activeSupply = supply; 
+   activeDemand = demand; 
    
    if(DrawZones) ChartRedraw(); 
 }
