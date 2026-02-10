@@ -137,15 +137,47 @@ void CheckTradeEntry()
 
    // --- 2. CHECK LTF TRADES (Pass ReferenceZonePips_LTF) ---
    if (AllowTrade_LTF) { 
+       
+       // OPTION 1: TREND ALIGNMENT LOGIC
+       bool allowBuys = true;
+       bool allowSells = true;
+       
+       if (UseTrendAlignment) {
+           if (currentMarketTrend_HTF == 1) {
+               // HTF is UP -> Only allow LTF Buys
+               allowBuys = true;
+               allowSells = false;
+           } else if (currentMarketTrend_HTF == -1) {
+               // HTF is DOWN -> Only allow LTF Sells
+               allowBuys = false;
+               allowSells = true;
+           } else {
+               // HTF is Range/Unknown -> No Trading allowed in Strict Alignment
+               allowBuys = false;
+               allowSells = false;
+           }
+       }
+       // ---------------------------------------
+
        if (AllowTrendEntry_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
-          if (currentMarketTrend_LTF == 1) ExecuteEntryLogic(activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
-          else if (currentMarketTrend_LTF == -1) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF", ReferenceZonePips_LTF);
+          // BUY SIGNAL (Must be allowed by HTF)
+          if (currentMarketTrend_LTF == 1 && allowBuys) 
+              ExecuteEntryLogic(activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
+          // SELL SIGNAL (Must be allowed by HTF)
+          else if (currentMarketTrend_LTF == -1 && allowSells) 
+              ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF", ReferenceZonePips_LTF);
        }
        if (AllowBreakoutEntry_LTF) { 
-          if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) 
-             ExecuteEntryLogic(activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
-          if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) 
-             ExecuteEntryLogic(activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
+          // SELL BREAKOUT
+          if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
+             if (allowSells)
+                 ExecuteEntryLogic(activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
+          }
+          // BUY BREAKOUT
+          if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
+             if (allowBuys)
+                 ExecuteEntryLogic(activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
+          }
        }
    }
 }

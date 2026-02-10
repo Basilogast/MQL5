@@ -49,6 +49,9 @@ input bool AllowTrade_LTF         = true;
 input bool AllowTrendEntry_LTF    = true; 
 input bool AllowBreakoutEntry_LTF = false; 
 
+// NEW OPTION 1: TREND ALIGNMENT
+input bool UseTrendAlignment      = true; // If true, LTF trades must match HTF Trend
+
 input double RiskPercent     = 1.0;  
 input double MinRiskReward   = 2.0;  
 
@@ -64,7 +67,6 @@ input int    MaxCandleSizePips = 80;
 
 //--- 5. SCALING & ENTRY
 input group "Entry Logic"
-// UPDATED: Separated Reference Pips for correct scaling
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
