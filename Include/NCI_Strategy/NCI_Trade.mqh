@@ -27,8 +27,8 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    }
 }
 
-// Passed generic active zones to check
-void ExecuteEntryLogic(MergedZoneState &zone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag)
+// UPDATED: Now accepts 'refPips' to calculate the correct Sweet Spot for that timeframe
+void ExecuteEntryLogic(MergedZoneState &zone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips)
 {
    datetime relevantTime = zone.startTime;
    if (relevantTime != CurrentZoneID) {
@@ -58,10 +58,15 @@ void ExecuteEntryLogic(MergedZoneState &zone, MergedZoneState &opposingSupply, M
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   // --- DYNAMIC SCALING LOGIC ---
    double zoneHeightPrice = zone.top - zone.bottom;
    double zoneHeightPips = zoneHeightPrice / point;
    if (zoneHeightPips <= 0) zoneHeightPips = 1;
-   double scalingFactor = ReferenceZonePips / zoneHeightPips;
+   
+   // UPDATED: Uses the passed 'refPips' (HTF or LTF)
+   double scalingFactor = refPips / zoneHeightPips;
+   
    double dynamicEntryPct = BaseEntryDepth * scalingFactor;
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
    if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
@@ -116,31 +121,31 @@ void CheckTradeEntry()
 {
    if (PositionsTotal() > 0) return;
    
-   // --- 1. CHECK HTF TRADES ---
+   // --- 1. CHECK HTF TRADES (Pass ReferenceZonePips_HTF) ---
    if (AllowTrade_HTF) { 
-       if (AllowTrendEntry_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { // CHECK HTF TREND
-          if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF");
-          else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF");
+       if (AllowTrendEntry_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
+          if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF", ReferenceZonePips_HTF);
+          else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF", ReferenceZonePips_HTF);
        }
-       if (AllowBreakoutEntry_HTF) { // CHECK HTF BREAKOUT
+       if (AllowBreakoutEntry_HTF) { 
           if (activeFlippedSupply_HTF.isActive && activeDemand_HTF.isActive && activeFlippedSupply_HTF.endTime == 0) 
-             ExecuteEntryLogic(activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF");
+             ExecuteEntryLogic(activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF", ReferenceZonePips_HTF);
           if (activeFlippedDemand_HTF.isActive && activeSupply_HTF.isActive && activeFlippedDemand_HTF.endTime == 0) 
-             ExecuteEntryLogic(activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF");
+             ExecuteEntryLogic(activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF", ReferenceZonePips_HTF);
        }
    }
 
-   // --- 2. CHECK LTF TRADES ---
+   // --- 2. CHECK LTF TRADES (Pass ReferenceZonePips_LTF) ---
    if (AllowTrade_LTF) { 
-       if (AllowTrendEntry_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { // CHECK LTF TREND
-          if (currentMarketTrend_LTF == 1) ExecuteEntryLogic(activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF");
-          else if (currentMarketTrend_LTF == -1) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF");
+       if (AllowTrendEntry_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
+          if (currentMarketTrend_LTF == 1) ExecuteEntryLogic(activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
+          else if (currentMarketTrend_LTF == -1) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF", ReferenceZonePips_LTF);
        }
-       if (AllowBreakoutEntry_LTF) { // CHECK LTF BREAKOUT
+       if (AllowBreakoutEntry_LTF) { 
           if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) 
-             ExecuteEntryLogic(activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF");
+             ExecuteEntryLogic(activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
           if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) 
-             ExecuteEntryLogic(activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF");
+             ExecuteEntryLogic(activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
        }
    }
 }

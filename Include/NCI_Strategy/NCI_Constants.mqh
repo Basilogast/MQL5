@@ -40,14 +40,14 @@ input group "Trading Logic"
 input bool AllowTrading      = true; // Master Switch
 
 // HTF Specifics
-input bool AllowTrade_HTF    = false;        // Master HTF Toggle
-input bool AllowTrendEntry_HTF    = true;   // NEW: 1H Trend Only
-input bool AllowBreakoutEntry_HTF = true;   // NEW: 1H Breakout Only
+input bool AllowTrade_HTF         = false; 
+input bool AllowTrendEntry_HTF    = true; 
+input bool AllowBreakoutEntry_HTF = true; 
 
 // LTF Specifics
-input bool AllowTrade_LTF    = true;        // Master LTF Toggle
-input bool AllowTrendEntry_LTF    = true;   // NEW: 15M Trend Only
-input bool AllowBreakoutEntry_LTF = false;   // NEW: 15M Breakout Only
+input bool AllowTrade_LTF         = true; 
+input bool AllowTrendEntry_LTF    = true; 
+input bool AllowBreakoutEntry_LTF = false; 
 
 input double RiskPercent     = 1.0;  
 input double MinRiskReward   = 2.0;  
@@ -64,7 +64,10 @@ input int    MaxCandleSizePips = 80;
 
 //--- 5. SCALING & ENTRY
 input group "Entry Logic"
-input double ReferenceZonePips = 235.0;
+// UPDATED: Separated Reference Pips for correct scaling
+input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
+input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
+
 input double BaseEntryDepth    = 0.40;  
 input double BaseMaxDepth      = 0.75;
 input double TPZoneDepth     = 0.0;
