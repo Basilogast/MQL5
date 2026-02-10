@@ -92,6 +92,7 @@ void ExecuteEntryLogic(MergedZoneState &zone, MergedZoneState &opposingSupply, M
       if (ask <= entryPriceStart && ask >= entryPriceLimit) 
       {
          double sl = zone.bottom - (finalBuffer * point);
+         // TP Calculation using the passed 'opposingSupply' (which could be HTF or LTF)
          double tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth); 
          double risk = entryPriceStart - sl;
          double reward = tp - entryPriceStart;
@@ -109,6 +110,7 @@ void ExecuteEntryLogic(MergedZoneState &zone, MergedZoneState &opposingSupply, M
       if (bid >= entryPriceStart && bid <= entryPriceLimit) 
       {
          double sl = zone.top + (finalBuffer * point);
+         // TP Calculation using the passed 'opposingDemand' (which could be HTF or LTF)
          double tp = opposingDemand.top - ((opposingDemand.top - opposingDemand.bottom) * TPZoneDepth);
          double risk = sl - entryPriceStart;
          double reward = entryPriceStart - tp;
@@ -130,31 +132,50 @@ void CheckTradeEntry()
    // =========================================================
    if (Enable_ZiZ_Mode) {
       
-      // 1. ZiZ TREND ENTRIES (Buy Demand inside HTF Demand)
+      // 1. ZiZ TREND ENTRIES
       if (ZiZ_AllowTrend) {
          // BUY: LTF Demand inside HTF Demand
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
-             ExecuteEntryLogic(activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Trend", ReferenceZonePips_LTF);
+             
+             // DYNAMIC TP LOGIC (HTF DOMINANCE):
+             // If 1H Trend is UP, we assume the 15M pullback is ending and aim for the HTF Supply.
+             // We IGNORE the 15M trend here.
+             if (currentMarketTrend_HTF == 1) {
+                 ExecuteEntryLogic(activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+             } else {
+                 // If 1H Trend is flat or against us, we play safe (LTF Target).
+                 ExecuteEntryLogic(activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+             }
          }
+         
          // SELL: LTF Supply inside HTF Supply
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
-             ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Trend", ReferenceZonePips_LTF);
+             
+             // DYNAMIC TP LOGIC (HTF DOMINANCE):
+             // If 1H Trend is DOWN, we assume the 15M rally is ending and aim for the HTF Demand.
+             if (currentMarketTrend_HTF == -1) {
+                 ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+             } else {
+                 // If 1H Trend is flat or against us, we play safe (LTF Target).
+                 ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+             }
          }
       }
       
       // 2. ZiZ BREAKOUT ENTRIES (Flip Zone inside HTF Zone)
       if (ZiZ_AllowBreakout) {
-         // BUY BREAKOUT: LTF Flip Demand inside HTF Demand
+         // Breakouts remain on Safe Mode (LTF Targets) for now
+         
+         // BUY BREAKOUT
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0 && IsOverlapping(activeFlippedDemand_LTF, activeDemand_HTF)) {
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Breakout", ReferenceZonePips_LTF);
          }
-         // SELL BREAKOUT: LTF Flip Supply inside HTF Supply
+         // SELL BREAKOUT
          if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0 && IsOverlapping(activeFlippedSupply_LTF, activeSupply_HTF)) {
              ExecuteEntryLogic(activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Breakout", ReferenceZonePips_LTF);
          }
       }
       
-      // EXIT: If ZiZ Mode is ON, we do NOT execute Simple Mode logic.
       return; 
    }
 
