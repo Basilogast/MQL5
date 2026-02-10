@@ -12,14 +12,15 @@ bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
    return (MathMax(z1.bottom, z2.bottom) <= MathMin(z1.top, z2.top));
 }
 
-void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
+// *** UPDATED: Returns bool to indicate success ***
+bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double riskAmount = balance * (finalRiskPercent / 100.0); 
    double riskPoints = MathAbs(price - sl) / _Point;
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    
-   if (riskPoints <= 0 || tickValue == 0) return;
+   if (riskPoints <= 0 || tickValue == 0) return false;
    double lotSize = NormalizeDouble(riskAmount / (riskPoints * tickValue), 2);
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -30,11 +31,13 @@ void OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V79.0 " + comment)) {
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
+      return true;
    }
+   return false;
 }
 
-// *** UPDATED: Now accepts 'slZone' to separate Entry Zone from Stop Loss Zone ***
-void ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips)
+// *** UPDATED: Returns bool to let CheckTradeEntry know if RR passed ***
+bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips)
 {
    datetime relevantTime = entryZone.startTime;
    if (relevantTime != CurrentZoneID) {
@@ -43,23 +46,23 @@ void ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       CurrentZoneTradeCount = 0;
    }
    
-   if (ZoneIsBurned) return; 
+   if (ZoneIsBurned) return false; 
 
    double tradeRisk = RiskPercent;
    if (EntryMode == MODE_SINGLE) 
    {
-      if (CurrentZoneTradeCount > 0) return;
+      if (CurrentZoneTradeCount > 0) return false;
       tradeRisk = RiskPercent;
    }
    else if (EntryMode == MODE_DOUBLE) 
    {
       if (CurrentZoneTradeCount == 0) tradeRisk = RiskPercent;
       else if (CurrentZoneTradeCount == 1) tradeRisk = RiskPercent * 0.5;
-      else return;
+      else return false;
    }
    else if (EntryMode == MODE_INFINITE) tradeRisk = RiskPercent;
 
-   if (UseVolatilityGuard) { if (!CheckVolatility()) return; }
+   if (UseVolatilityGuard) { if (!CheckVolatility()) return false; }
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -94,15 +97,16 @@ void ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       
       if (ask <= entryPriceStart && ask >= entryPriceLimit) 
       {
-         // *** FIX: SL is now calculated based on the SL ZONE (HTF or LTF) ***
+         // SL is calculated based on the SL ZONE (HTF or LTF)
          double sl = slZone.bottom - (finalBuffer * point);
          
          double tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth); 
          double risk = entryPriceStart - sl;
          double reward = tp - entryPriceStart;
          
+         // Standard Check: Must meet MinRiskReward
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, isBreakout ? "Breakout " + commentTag : "Standard " + commentTag, tradeRisk);
+            return OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, isBreakout ? "Breakout " + commentTag : "Standard " + commentTag, tradeRisk);
          }
       }
    }
@@ -113,18 +117,20 @@ void ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       
       if (bid >= entryPriceStart && bid <= entryPriceLimit) 
       {
-         // *** FIX: SL is now calculated based on the SL ZONE (HTF or LTF) ***
+         // SL is calculated based on the SL ZONE (HTF or LTF)
          double sl = slZone.top + (finalBuffer * point);
          
          double tp = opposingDemand.top - ((opposingDemand.top - opposingDemand.bottom) * TPZoneDepth);
          double risk = sl - entryPriceStart;
          double reward = entryPriceStart - tp;
          
+         // Standard Check: Must meet MinRiskReward
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, isBreakout ? "Breakout " + commentTag : "Standard " + commentTag, tradeRisk);
+            return OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, isBreakout ? "Breakout " + commentTag : "Standard " + commentTag, tradeRisk);
          }
       }
    }
+   return false;
 }
 
 void CheckTradeEntry()
@@ -142,13 +148,20 @@ void CheckTradeEntry()
          // BUY: LTF Demand inside HTF Demand
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
              
-             // DYNAMIC SL LOGIC (HTF DOMINANCE):
+             // *** UPDATED LOGIC: HTF DOMINANCE WITH FALLBACK ***
+             // We only care if 1H is UP. We ignore the 15M trend.
              if (currentMarketTrend_HTF == 1) {
-                 // CASE A: HTF Swing (Aligned) -> Target HTF Supply, PROTECT with HTF Demand (Safe SL)
-                 // Entry: LTF Zone | SL: HTF Zone | TP: HTF Zone
-                 ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+                 
+                 // ATTEMPT 1: SWING TRADE (Target HTF, Protect HTF)
+                 bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+                 
+                 // ATTEMPT 2: FALLBACK TO SCALP (If Swing failed due to RR)
+                 if (!swingSuccess) {
+                     ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-Fallback", ReferenceZonePips_LTF);
+                 }
+                 
              } else {
-                 // CASE B: Scalp (Misaligned) -> Target LTF Supply, Protect with LTF Demand (Tight SL)
+                 // CASE B: Standard Scalp (1H is Flat/Down, but we are in a ZiZ so we scalp)
                  ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
              }
          }
@@ -156,13 +169,20 @@ void CheckTradeEntry()
          // SELL: LTF Supply inside HTF Supply
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
              
-             // DYNAMIC SL LOGIC (HTF DOMINANCE):
+             // *** UPDATED LOGIC: HTF DOMINANCE WITH FALLBACK ***
+             // We only care if 1H is DOWN. We ignore the 15M trend.
              if (currentMarketTrend_HTF == -1) {
-                 // CASE A: HTF Swing (Aligned) -> Target HTF Demand, PROTECT with HTF Supply (Safe SL)
-                 // Entry: LTF Zone | SL: HTF Zone | TP: HTF Zone
-                 ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+                 
+                 // ATTEMPT 1: SWING TRADE (Target HTF, Protect HTF)
+                 bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+                 
+                 // ATTEMPT 2: FALLBACK TO SCALP (If Swing failed due to RR)
+                 if (!swingSuccess) {
+                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-Fallback", ReferenceZonePips_LTF);
+                 }
+                 
              } else {
-                 // CASE B: Scalp (Misaligned) -> Target LTF Demand, Protect with LTF Supply (Tight SL)
+                 // CASE B: Standard Scalp (1H is Flat/Up, but we are in a ZiZ so we scalp)
                  ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
              }
          }
@@ -170,7 +190,6 @@ void CheckTradeEntry()
       
       // 2. ZiZ BREAKOUT ENTRIES (Flip Zone inside HTF Zone)
       if (ZiZ_AllowBreakout) {
-         // Breakouts remain standard (LTF SL / LTF TP)
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0 && IsOverlapping(activeFlippedDemand_LTF, activeDemand_HTF)) {
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Breakout", ReferenceZonePips_LTF);
          }
