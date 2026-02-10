@@ -85,12 +85,15 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
    } 
 }
 
-// *** VISUAL UPDATE: Respect Dashboard Flags ***
+// *** VISUAL UPDATE: Optimization Speed Fix ***
 void DrawZigZagLines(string suffix, PointStruct &points[]) { 
-   // 1. Clear old objects regardless of state
+   // 1. SPEED FIX: Stop here if optimizing
+   if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
+
+   // 2. Clear old objects regardless of state
    ObjectsDeleteAll(0, "NCI_ZZ_" + suffix); 
    
-   // 2. Check if this layer is disabled via Dashboard
+   // 3. Check if this layer is disabled via Dashboard
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
