@@ -33,6 +33,7 @@ input bool Simple_UseTrendAlign   = true;  // Filter LTF trades with HTF Trend?
 input group "Sector B: Zone-in-Zone (ZiZ)"
 input bool Enable_ZiZ_Mode        = true; // If TRUE, IGNORES Sector A
 input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone
+input bool ZiZ_AllowStairStep     = true;  // [NEW] Trade LTF Zones ALIGNED with Trend (Floating)
 input bool ZiZ_AllowBreakout      = false; // Trade LTF Breakout Zone inside HTF Zone
 
 //--- 3. SHARED RISK SETTINGS (Global)
@@ -74,8 +75,6 @@ input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 input double BaseEntryDepth    = 0.40;  
 input double BaseMaxDepth      = 0.75;
 input double TPZoneDepth       = 0.0;
-
-// *** NEW ADDITION ***
 input double Breakout_HTF_Buffer_Pips = 50.0; // Buffer for Breakout Zone proximity
 
 //--- 8. BUFFER SETTINGS

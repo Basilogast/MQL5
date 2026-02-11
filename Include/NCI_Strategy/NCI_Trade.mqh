@@ -174,7 +174,7 @@ void CheckTradeEntry()
    // =========================================================
    if (Enable_ZiZ_Mode) {
       
-      // 1. ZiZ TREND ENTRIES
+      // 1. ZiZ TREND ENTRIES (Standard Overlap)
       if (ZiZ_AllowTrend) {
          // BUY
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
@@ -195,19 +195,34 @@ void CheckTradeEntry()
              }
          }
       }
+
+      // 2. ZiZ STAIR-STEP ENTRIES (Floating Zones in Trend Direction) [NEW]
+      if (ZiZ_AllowStairStep) {
+         // BUY: Trend is UP + M15 Demand Exists
+         if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
+             // We do NOT check IsOverlapping here. We trust the trend.
+             // We use HTF Supply as the hard ceiling (Exit).
+             ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+         }
+         
+         // SELL: Trend is DOWN + M15 Supply Exists
+         if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
+             // We do NOT check IsOverlapping here. We trust the trend.
+             // We use HTF Demand as the hard floor (Exit).
+             ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+         }
+      }
       
-      // 2. ZiZ BREAKOUT ENTRIES (Flip Zone NEAR HTF Zone)
+      // 3. ZiZ BREAKOUT ENTRIES (Flip Zones)
       if (ZiZ_AllowBreakout) {
-         // BUY Breakout: Use IsNear() instead of IsOverlapping()
-         if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0 
-             && IsNear(activeFlippedDemand_LTF, activeDemand_HTF, Breakout_HTF_Buffer_Pips)) 
+         // BUY Breakout: Removed IsNear constraint for unconstrained breakouts
+         if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) 
          {
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
          
-         // SELL Breakout: Use IsNear() instead of IsOverlapping()
-         if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0 
-             && IsNear(activeFlippedSupply_LTF, activeSupply_HTF, Breakout_HTF_Buffer_Pips)) 
+         // SELL Breakout: Removed IsNear constraint for unconstrained breakouts
+         if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) 
          {
              ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
