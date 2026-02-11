@@ -73,7 +73,10 @@ input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
 input double BaseEntryDepth    = 0.40;  
 input double BaseMaxDepth      = 0.75;
-input double TPZoneDepth     = 0.0;
+input double TPZoneDepth       = 0.0;
+
+// *** NEW ADDITION ***
+input double Breakout_HTF_Buffer_Pips = 50.0; // Buffer for Breakout Zone proximity
 
 //--- 8. BUFFER SETTINGS
 input group "Buffer Logic"

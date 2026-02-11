@@ -12,14 +12,35 @@ bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
    return (MathMax(z1.bottom, z2.bottom) <= MathMin(z1.top, z2.top));
 }
 
-// --- HELPER: CONVERT TREND TO SHORT STRING (To fit 31 char limit) ---
+// --- NEW HELPER: CHECK IF ZONES ARE NEAR (WITH BUFFER) ---
+bool IsNear(MergedZoneState &z1, MergedZoneState &z2, double maxPips) {
+   if (!z1.isActive || !z2.isActive) return false;
+   
+   // 1. Strict Overlap (The original check)
+   if (MathMax(z1.bottom, z2.bottom) <= MathMin(z1.top, z2.top)) return true;
+   
+   // 2. Proximity Check (The relaxed check)
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if (point == 0) return false;
+   
+   double dist = 0;
+   // Case A: z1 is strictly below z2
+   if (z1.top < z2.bottom) dist = (z2.bottom - z1.top);
+   // Case B: z2 is strictly below z1
+   else if (z2.top < z1.bottom) dist = (z1.bottom - z2.top);
+   
+   // Return true if distance is within the allowed buffer
+   return ((dist / point) <= maxPips);
+}
+
+// --- HELPER: CONVERT TREND TO SHORT STRING ---
 string GetTrendLabel(int trendVal) {
    if (trendVal == 1) return "U"; // Up
    if (trendVal == -1) return "D"; // Down
    return "Y"; // Yellow/Flat
 }
 
-// *** UPDATED: Returns bool to indicate success ***
+// *** OPEN TRADE FUNCTION ***
 bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -35,10 +56,8 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   // *** NEW COMPACT FORMAT: "ZiZ-Swing [H:U M:D]" ***
+   // Trend Stamp
    string trendStamp = StringFormat(" [H:%s M:%s]", GetTrendLabel(currentMarketTrend_HTF), GetTrendLabel(currentMarketTrend_LTF));
-   
-   // Removed "NCI V79.0" prefix to save space (Max 31 chars allowed)
    string finalComment = comment + trendStamp;
    
    if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, finalComment)) {
@@ -49,7 +68,7 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    return false;
 }
 
-// *** UPDATED: Returns bool to let CheckTradeEntry know if RR passed ***
+// *** ENTRY LOGIC ***
 bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips)
 {
    datetime relevantTime = entryZone.startTime;
@@ -81,7 +100,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   // --- 1. Calculate ENTRY based on the ENTRY ZONE (Sniper) ---
    double zoneHeightPrice = entryZone.top - entryZone.bottom;
    double zoneHeightPips = zoneHeightPrice / point;
    if (zoneHeightPips <= 0) zoneHeightPips = 1;
@@ -89,13 +107,16 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    double scalingFactor = refPips / zoneHeightPips;
    
    double dynamicEntryPct = BaseEntryDepth * scalingFactor;
+   
+   // *** CHANGE: Force shallow entry for Breakouts (Edge of zone) ***
+   if (isBreakout) dynamicEntryPct = 0.05; 
+
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
    if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
    if (dynamicEntryPct > 0.60) dynamicEntryPct = 0.60;
    if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
    if (dynamicMaxPct > 0.80) dynamicMaxPct = 0.80;
 
-   // --- 2. Calculate BUFFER ---
    double finalBuffer = BaseBufferPoints;
    if (UseDynamicBuffer) {
       finalBuffer = BaseBufferPoints * scalingFactor * (1.0 + dynamicEntryPct);
@@ -110,16 +131,12 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       
       if (ask <= entryPriceStart && ask >= entryPriceLimit) 
       {
-         // SL is calculated based on the SL ZONE (HTF or LTF)
          double sl = slZone.bottom - (finalBuffer * point);
-         
          double tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth); 
          double risk = entryPriceStart - sl;
          double reward = tp - entryPriceStart;
          
-         // Standard Check: Must meet MinRiskReward
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            // Shortened "Standard" to "" and "Breakout" to "Brk" to save space
             string prefix = isBreakout ? "Brk " : ""; 
             return OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
          }
@@ -132,16 +149,12 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       
       if (bid >= entryPriceStart && bid <= entryPriceLimit) 
       {
-         // SL is calculated based on the SL ZONE (HTF or LTF)
          double sl = slZone.top + (finalBuffer * point);
-         
          double tp = opposingDemand.top - ((opposingDemand.top - opposingDemand.bottom) * TPZoneDepth);
          double risk = sl - entryPriceStart;
          double reward = entryPriceStart - tp;
          
-         // Standard Check: Must meet MinRiskReward
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            // Shortened "Standard" to "" and "Breakout" to "Brk" to save space
             string prefix = isBreakout ? "Brk " : "";
             return OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
          }
@@ -150,6 +163,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    return false;
 }
 
+// *** MAIN CHECK FUNCTION ***
 void CheckTradeEntry()
 {
    if (PositionsTotal() > 0) return;
@@ -162,55 +176,39 @@ void CheckTradeEntry()
       
       // 1. ZiZ TREND ENTRIES
       if (ZiZ_AllowTrend) {
-         // BUY: LTF Demand inside HTF Demand
+         // BUY
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
-             
-             // *** UPDATED LOGIC: HTF DOMINANCE WITH FALLBACK ***
-             // We only care if 1H is UP. We ignore the 15M trend.
              if (currentMarketTrend_HTF == 1) {
-                 
-                 // ATTEMPT 1: SWING TRADE (Target HTF, Protect HTF)
                  bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                 
-                 // ATTEMPT 2: FALLBACK TO SCALP (If Swing failed due to RR)
-                 if (!swingSuccess) {
-                     ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
-                 }
-                 
+                 if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
              } else {
-                 // CASE B: Standard Scalp (1H is Flat/Down, but we are in a ZiZ so we scalp)
                  ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
              }
          }
-         
-         // SELL: LTF Supply inside HTF Supply
+         // SELL
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
-             
-             // *** UPDATED LOGIC: HTF DOMINANCE WITH FALLBACK ***
-             // We only care if 1H is DOWN. We ignore the 15M trend.
              if (currentMarketTrend_HTF == -1) {
-                 
-                 // ATTEMPT 1: SWING TRADE (Target HTF, Protect HTF)
                  bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                 
-                 // ATTEMPT 2: FALLBACK TO SCALP (If Swing failed due to RR)
-                 if (!swingSuccess) {
-                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
-                 }
-                 
+                 if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
              } else {
-                 // CASE B: Standard Scalp (1H is Flat/Up, but we are in a ZiZ so we scalp)
                  ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
              }
          }
       }
       
-      // 2. ZiZ BREAKOUT ENTRIES (Flip Zone inside HTF Zone)
+      // 2. ZiZ BREAKOUT ENTRIES (Flip Zone NEAR HTF Zone)
       if (ZiZ_AllowBreakout) {
-         if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0 && IsOverlapping(activeFlippedDemand_LTF, activeDemand_HTF)) {
+         // BUY Breakout: Use IsNear() instead of IsOverlapping()
+         if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0 
+             && IsNear(activeFlippedDemand_LTF, activeDemand_HTF, Breakout_HTF_Buffer_Pips)) 
+         {
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
-         if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0 && IsOverlapping(activeFlippedSupply_LTF, activeSupply_HTF)) {
+         
+         // SELL Breakout: Use IsNear() instead of IsOverlapping()
+         if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0 
+             && IsNear(activeFlippedSupply_LTF, activeSupply_HTF, Breakout_HTF_Buffer_Pips)) 
+         {
              ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
       }
@@ -218,12 +216,9 @@ void CheckTradeEntry()
    }
 
    // =========================================================
-   // SECTOR A: SIMPLE STRATEGY (SCATTERGUN MODE)
+   // SECTOR A: SIMPLE STRATEGY
    // =========================================================
    if (Enable_Simple_Mode) {
-      // NOTE: In Simple Mode, SL Zone is always the same as Entry Zone.
-      
-      // --- 1. SIMPLE HTF TRADES ---
       if (Simple_Trade_HTF) { 
           if (Simple_Trend_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
              if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF", ReferenceZonePips_HTF);
@@ -237,31 +232,24 @@ void CheckTradeEntry()
           }
       }
 
-      // --- 2. SIMPLE LTF TRADES ---
       if (Simple_Trade_LTF) { 
           bool allowBuys = true;
           bool allowSells = true;
-          
           if (Simple_UseTrendAlign) {
               if (currentMarketTrend_HTF == 1) { allowBuys = true; allowSells = false; } 
               else if (currentMarketTrend_HTF == -1) { allowBuys = false; allowSells = true; } 
               else { allowBuys = false; allowSells = false; }
           }
-
           if (Simple_Trend_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
-             if (currentMarketTrend_LTF == 1 && allowBuys) 
-                 ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
-             else if (currentMarketTrend_LTF == -1 && allowSells) 
-                 ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF", ReferenceZonePips_LTF);
+             if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
+             else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF", ReferenceZonePips_LTF);
           }
           if (Simple_Breakout_LTF) { 
              if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-                if (allowSells)
-                    ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
              }
              if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-                if (allowBuys)
-                    ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
              }
           }
       }
@@ -326,26 +314,18 @@ void ManageTradeState() {
    } 
 }
 
-// ==========================================================================
-// UPDATED FUNCTION: Export Trade Journal + Trend Data
-// ==========================================================================
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
-   
-   // Added FILE_COMMON flag to ensure it goes to the Common/Files folder
    int file_handle = FileOpen(filename, FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON, ",");
    
    if(file_handle != INVALID_HANDLE)
    {
-      // 1. Write Header with NEW Columns
       FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "Profit", "Comment", "H1 Trend", "M15 Trend");
       
-      // 2. Select All History
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
       
-      // 3. Loop through deals and write to file
       for(int i = 0; i < total_deals; i++)
       {
          ulong ticket_deal = HistoryDealGetTicket(i);
@@ -356,26 +336,22 @@ void ExportTransactionsToCSV()
             string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
             
-            // --- Parse Trend Data from Comment ---
-            // Pattern: "... [H:U M:D]"
             string h1_trend = "N/A";
             string m15_trend = "N/A";
             
-            // Updated Parser for Short Codes [H:U M:D]
             int startIdx = StringFind(rawComment, "[H:");
             if (startIdx >= 0) {
-               // Extract substring starting after "[H:"
                string sub = StringSubstr(rawComment, startIdx + 3); 
                int spaceIdx = StringFind(sub, " ");
                if (spaceIdx > 0) {
-                   h1_trend = StringSubstr(sub, 0, spaceIdx); // Get H1 Value (U, D, Y)
+                   h1_trend = StringSubstr(sub, 0, spaceIdx); 
                    
                    int m15Idx = StringFind(sub, "M:");
                    if (m15Idx > 0) {
                        string sub2 = StringSubstr(sub, m15Idx + 2);
                        int closeBracket = StringFind(sub2, "]");
                        if (closeBracket > 0) {
-                           m15_trend = StringSubstr(sub2, 0, closeBracket); // Get M15 Value (U, D, Y)
+                           m15_trend = StringSubstr(sub2, 0, closeBracket); 
                        }
                    }
                }
@@ -388,9 +364,9 @@ void ExportTransactionsToCSV()
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_VOLUME), 2),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PRICE), 5),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PROFIT), 2),
-               rawComment, // Full Comment
-               h1_trend,   // Extracted H1 Trend
-               m15_trend   // Extracted M15 Trend
+               rawComment, 
+               h1_trend,   
+               m15_trend   
             );
          }
       }

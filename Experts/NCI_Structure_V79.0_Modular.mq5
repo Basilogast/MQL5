@@ -102,9 +102,10 @@ void OnDeinit(const int reason)
    ExportTransactionsToCSV();
    
    // 2. Cleanup Visuals
-   if (!MQLInfoInteger(MQL_OPTIMIZATION)) {
-      ObjectsDeleteAll(0, "NCI_ZZ_"); 
+   if (!MQLInfoInteger(MQL_TESTER)) 
+   {
+      ObjectsDeleteAll(0, "NCI_ZZ_");
       ObjectsDeleteAll(0, "NCI_Zone_");
-      ObjectsDeleteAll(0, "NCI_Flip_");
+      ObjectsDeleteAll(0, "NCI_Dash_");
    }
 }
