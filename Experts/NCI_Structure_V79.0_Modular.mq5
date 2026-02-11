@@ -27,7 +27,7 @@ int OnInit()
    
    // --- SPEED FIX: Skip Visuals during Optimization ---
    if (!MQLInfoInteger(MQL_OPTIMIZATION)) {
-      ObjectsDeleteAll(0, "NCI_ZZ_"); 
+      ObjectsDeleteAll(0, "NCI_ZZ_");
       ObjectsDeleteAll(0, "NCI_Zone_");
       ObjectsDeleteAll(0, "NCI_Flip_");
       
@@ -91,4 +91,20 @@ void OnTick()
 
    if(AllowTrading) CheckTradeEntry();
 }
+
 //+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   // 1. Export the Trade Journal to CSV (New Function)
+   // This will run automatically when you stop the test or remove the EA
+   ExportTransactionsToCSV();
+   
+   // 2. Cleanup Visuals
+   if (!MQLInfoInteger(MQL_OPTIMIZATION)) {
+      ObjectsDeleteAll(0, "NCI_ZZ_"); 
+      ObjectsDeleteAll(0, "NCI_Zone_");
+      ObjectsDeleteAll(0, "NCI_Flip_");
+   }
+}

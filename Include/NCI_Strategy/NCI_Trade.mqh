@@ -12,6 +12,13 @@ bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
    return (MathMax(z1.bottom, z2.bottom) <= MathMin(z1.top, z2.top));
 }
 
+// --- HELPER: CONVERT TREND TO SHORT STRING (To fit 31 char limit) ---
+string GetTrendLabel(int trendVal) {
+   if (trendVal == 1) return "U"; // Up
+   if (trendVal == -1) return "D"; // Down
+   return "Y"; // Yellow/Flat
+}
+
 // *** UPDATED: Returns bool to indicate success ***
 bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
@@ -28,7 +35,13 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, "NCI V79.0 " + comment)) {
+   // *** NEW COMPACT FORMAT: "ZiZ-Swing [H:U M:D]" ***
+   string trendStamp = StringFormat(" [H:%s M:%s]", GetTrendLabel(currentMarketTrend_HTF), GetTrendLabel(currentMarketTrend_LTF));
+   
+   // Removed "NCI V79.0" prefix to save space (Max 31 chars allowed)
+   string finalComment = comment + trendStamp;
+   
+   if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, finalComment)) {
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
       return true;
@@ -106,7 +119,9 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          // Standard Check: Must meet MinRiskReward
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            return OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, isBreakout ? "Breakout " + commentTag : "Standard " + commentTag, tradeRisk);
+            // Shortened "Standard" to "" and "Breakout" to "Brk" to save space
+            string prefix = isBreakout ? "Brk " : ""; 
+            return OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
          }
       }
    }
@@ -126,7 +141,9 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          // Standard Check: Must meet MinRiskReward
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            return OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, isBreakout ? "Breakout " + commentTag : "Standard " + commentTag, tradeRisk);
+            // Shortened "Standard" to "" and "Breakout" to "Brk" to save space
+            string prefix = isBreakout ? "Brk " : "";
+            return OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
          }
       }
    }
@@ -157,7 +174,7 @@ void CheckTradeEntry()
                  
                  // ATTEMPT 2: FALLBACK TO SCALP (If Swing failed due to RR)
                  if (!swingSuccess) {
-                     ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-Fallback", ReferenceZonePips_LTF);
+                     ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
                  }
                  
              } else {
@@ -178,7 +195,7 @@ void CheckTradeEntry()
                  
                  // ATTEMPT 2: FALLBACK TO SCALP (If Swing failed due to RR)
                  if (!swingSuccess) {
-                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-Fallback", ReferenceZonePips_LTF);
+                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
                  }
                  
              } else {
@@ -191,10 +208,10 @@ void CheckTradeEntry()
       // 2. ZiZ BREAKOUT ENTRIES (Flip Zone inside HTF Zone)
       if (ZiZ_AllowBreakout) {
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0 && IsOverlapping(activeFlippedDemand_LTF, activeDemand_HTF)) {
-             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Breakout", ReferenceZonePips_LTF);
+             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
          if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0 && IsOverlapping(activeFlippedSupply_LTF, activeSupply_HTF)) {
-             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Breakout", ReferenceZonePips_LTF);
+             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
       }
       return; 
@@ -307,4 +324,82 @@ void ManageTradeState() {
       } 
       CurrentOpenTicket = 0;
    } 
+}
+
+// ==========================================================================
+// UPDATED FUNCTION: Export Trade Journal + Trend Data
+// ==========================================================================
+void ExportTransactionsToCSV()
+{
+   string filename = "NCI_Journal_" + _Symbol + ".csv";
+   
+   // Added FILE_COMMON flag to ensure it goes to the Common/Files folder
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON, ",");
+   
+   if(file_handle != INVALID_HANDLE)
+   {
+      // 1. Write Header with NEW Columns
+      FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "Profit", "Comment", "H1 Trend", "M15 Trend");
+      
+      // 2. Select All History
+      HistorySelect(0, TimeCurrent());
+      int total_deals = HistoryDealsTotal();
+      
+      // 3. Loop through deals and write to file
+      for(int i = 0; i < total_deals; i++)
+      {
+         ulong ticket_deal = HistoryDealGetTicket(i);
+         long type = HistoryDealGetInteger(ticket_deal, DEAL_TYPE);
+         
+         if(type == DEAL_TYPE_BUY || type == DEAL_TYPE_SELL) 
+         {
+            string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
+            string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
+            
+            // --- Parse Trend Data from Comment ---
+            // Pattern: "... [H:U M:D]"
+            string h1_trend = "N/A";
+            string m15_trend = "N/A";
+            
+            // Updated Parser for Short Codes [H:U M:D]
+            int startIdx = StringFind(rawComment, "[H:");
+            if (startIdx >= 0) {
+               // Extract substring starting after "[H:"
+               string sub = StringSubstr(rawComment, startIdx + 3); 
+               int spaceIdx = StringFind(sub, " ");
+               if (spaceIdx > 0) {
+                   h1_trend = StringSubstr(sub, 0, spaceIdx); // Get H1 Value (U, D, Y)
+                   
+                   int m15Idx = StringFind(sub, "M:");
+                   if (m15Idx > 0) {
+                       string sub2 = StringSubstr(sub, m15Idx + 2);
+                       int closeBracket = StringFind(sub2, "]");
+                       if (closeBracket > 0) {
+                           m15_trend = StringSubstr(sub2, 0, closeBracket); // Get M15 Value (U, D, Y)
+                       }
+                   }
+               }
+            }
+
+            FileWrite(file_handle, 
+               (string)HistoryDealGetInteger(ticket_deal, DEAL_TIME),
+               (string)ticket_deal,
+               sType,
+               DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_VOLUME), 2),
+               DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PRICE), 5),
+               DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PROFIT), 2),
+               rawComment, // Full Comment
+               h1_trend,   // Extracted H1 Trend
+               m15_trend   // Extracted M15 Trend
+            );
+         }
+      }
+      
+      FileClose(file_handle);
+      Print(">> Exported Trade Journal to: " + filename);
+   }
+   else
+   {
+      Print(">> Error opening file for export: ", GetLastError());
+   }
 }
