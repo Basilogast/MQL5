@@ -15,29 +15,20 @@ bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
 // --- NEW HELPER: CHECK IF ZONES ARE NEAR (WITH BUFFER) ---
 bool IsNear(MergedZoneState &z1, MergedZoneState &z2, double maxPips) {
    if (!z1.isActive || !z2.isActive) return false;
-   
-   // 1. Strict Overlap (The original check)
    if (MathMax(z1.bottom, z2.bottom) <= MathMin(z1.top, z2.top)) return true;
-   
-   // 2. Proximity Check (The relaxed check)
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    if (point == 0) return false;
-   
    double dist = 0;
-   // Case A: z1 is strictly below z2
    if (z1.top < z2.bottom) dist = (z2.bottom - z1.top);
-   // Case B: z2 is strictly below z1
    else if (z2.top < z1.bottom) dist = (z1.bottom - z2.top);
-   
-   // Return true if distance is within the allowed buffer
    return ((dist / point) <= maxPips);
 }
 
 // --- HELPER: CONVERT TREND TO SHORT STRING ---
 string GetTrendLabel(int trendVal) {
-   if (trendVal == 1) return "U"; // Up
-   if (trendVal == -1) return "D"; // Down
-   return "Y"; // Yellow/Flat
+   if (trendVal == 1) return "U"; 
+   if (trendVal == -1) return "D"; 
+   return "Y"; 
 }
 
 // *** OPEN TRADE FUNCTION ***
@@ -56,7 +47,6 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
-   // Trend Stamp
    string trendStamp = StringFormat(" [H:%s M:%s]", GetTrendLabel(currentMarketTrend_HTF), GetTrendLabel(currentMarketTrend_LTF));
    string finalComment = comment + trendStamp;
    
@@ -108,7 +98,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    
    double dynamicEntryPct = BaseEntryDepth * scalingFactor;
    
-   // *** CHANGE: Force shallow entry for Breakouts (Edge of zone) ***
    if (isBreakout) dynamicEntryPct = 0.05; 
 
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
@@ -169,14 +158,8 @@ void CheckTradeEntry()
    if (PositionsTotal() > 0) return;
    if (!AllowTrading) return;
 
-   // =========================================================
-   // SECTOR B: ADVANCED STRATEGY (ZiZ SNIPER MODE)
-   // =========================================================
    if (Enable_ZiZ_Mode) {
-      
-      // 1. ZiZ TREND ENTRIES (Standard Overlap)
       if (ZiZ_AllowTrend) {
-         // BUY
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
              if (currentMarketTrend_HTF == 1) {
                  bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
@@ -185,7 +168,6 @@ void CheckTradeEntry()
                  ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
              }
          }
-         // SELL
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
              if (currentMarketTrend_HTF == -1) {
                  bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
@@ -196,43 +178,26 @@ void CheckTradeEntry()
          }
       }
 
-      // 2. ZiZ STAIR-STEP ENTRIES (Floating Zones in Trend Direction) [NEW]
       if (ZiZ_AllowStairStep) {
-         // BUY: Trend is UP + M15 Demand Exists
          if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
-             // We do NOT check IsOverlapping here. We trust the trend.
-             // We use HTF Supply as the hard ceiling (Exit).
              ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
          }
-         
-         // SELL: Trend is DOWN + M15 Supply Exists
          if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-             // We do NOT check IsOverlapping here. We trust the trend.
-             // We use HTF Demand as the hard floor (Exit).
              ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
          }
       }
       
-      // 3. ZiZ BREAKOUT ENTRIES (Flip Zones)
       if (ZiZ_AllowBreakout) {
-         // BUY Breakout: Removed IsNear constraint for unconstrained breakouts
-         if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) 
-         {
+         if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
-         
-         // SELL Breakout: Removed IsNear constraint for unconstrained breakouts
-         if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) 
-         {
+         if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
              ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
       }
       return; 
    }
 
-   // =========================================================
-   // SECTOR A: SIMPLE STRATEGY
-   // =========================================================
    if (Enable_Simple_Mode) {
       if (Simple_Trade_HTF) { 
           if (Simple_Trend_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
@@ -271,39 +236,92 @@ void CheckTradeEntry()
    }
 }
 
+// *** UPDATED MANAGE POSITIONS ***
 void ManageOpenPositions() { 
-   if (!EnableProfitLocking) return;
+   if (!EnableProfitLocking && !Enable_RR_Locking) return;
+   
    for(int i = PositionsTotal() - 1; i >= 0; i--) { 
       ulong ticket = PositionGetTicket(i);
       if(ticket <= 0) continue; 
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue; 
       if(PositionGetInteger(POSITION_MAGIC) != 111222) continue; 
+      
       long openTime = PositionGetInteger(POSITION_TIME); 
       long updateTime = PositionGetInteger(POSITION_TIME_UPDATE);
-      if (updateTime > openTime) continue; 
+      if (updateTime > openTime) continue; // Skip if already modified
+      
       double openPrice = PositionGetDouble(POSITION_PRICE_OPEN); 
+      double currentSL = PositionGetDouble(POSITION_SL);
       double currentTP = PositionGetDouble(POSITION_TP); 
-      double currentPrice = 0;
       long type = PositionGetInteger(POSITION_TYPE); 
+      
       if (currentTP == 0) continue; 
+      
+      double currentPrice = 0;
+      bool rrLockTriggered = false;
+      double newSL_RR = 0;
+
       if (type == POSITION_TYPE_BUY) { 
          currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double totalProfitDist = currentTP - openPrice; 
-         if (totalProfitDist <= 0) continue; 
-         double triggerPrice = openPrice + (totalProfitDist * LockTriggerPercent);
-         if (currentPrice >= triggerPrice) { 
-            double newSL = openPrice + (totalProfitDist * LockPositionPercent);
-            if (newSL > PositionGetDouble(POSITION_SL) + _Point) trade.PositionModify(ticket, newSL, currentTP); 
+         
+         // 1. Check RR Locking
+         if (Enable_RR_Locking && currentSL < openPrice) { // Only if SL is still at risk
+             double riskDist = openPrice - currentSL;
+             if (riskDist > 0) {
+                 double profitDist = currentPrice - openPrice;
+                 double currentRR = profitDist / riskDist;
+                 if (currentRR >= RR_Lock_Trigger) {
+                     newSL_RR = openPrice + (riskDist * RR_Lock_Target);
+                     if (newSL_RR > currentSL + _Point) {
+                         trade.PositionModify(ticket, newSL_RR, currentTP);
+                         rrLockTriggered = true;
+                     }
+                 }
+             }
+         }
+
+         // 2. Check % Distance Locking (If RR didn't trigger)
+         if (!rrLockTriggered && EnableProfitLocking) {
+             double totalProfitDist = currentTP - openPrice; 
+             if (totalProfitDist > 0) {
+                 double triggerPrice = openPrice + (totalProfitDist * LockTriggerPercent);
+                 if (currentPrice >= triggerPrice) { 
+                    double newSL = openPrice + (totalProfitDist * LockPositionPercent);
+                    if (newSL > currentSL + _Point) trade.PositionModify(ticket, newSL, currentTP); 
+                 }
+             }
          } 
+         
       } else if (type == POSITION_TYPE_SELL) { 
          currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         double totalProfitDist = openPrice - currentTP; 
-         if (totalProfitDist <= 0) continue; 
-         double triggerPrice = openPrice - (totalProfitDist * LockTriggerPercent);
-         if (currentPrice <= triggerPrice) { 
-            double newSL = openPrice - (totalProfitDist * LockPositionPercent);
-            if (newSL < PositionGetDouble(POSITION_SL) - _Point) trade.PositionModify(ticket, newSL, currentTP); 
-         } 
+         
+         // 1. Check RR Locking
+         if (Enable_RR_Locking && currentSL > openPrice) { // Only if SL is still at risk
+             double riskDist = currentSL - openPrice;
+             if (riskDist > 0) {
+                 double profitDist = openPrice - currentPrice;
+                 double currentRR = profitDist / riskDist;
+                 if (currentRR >= RR_Lock_Trigger) {
+                     newSL_RR = openPrice - (riskDist * RR_Lock_Target);
+                     if (newSL_RR < currentSL - _Point) {
+                         trade.PositionModify(ticket, newSL_RR, currentTP);
+                         rrLockTriggered = true;
+                     }
+                 }
+             }
+         }
+
+         // 2. Check % Distance Locking (If RR didn't trigger)
+         if (!rrLockTriggered && EnableProfitLocking) {
+             double totalProfitDist = openPrice - currentTP; 
+             if (totalProfitDist > 0) {
+                 double triggerPrice = openPrice - (totalProfitDist * LockTriggerPercent);
+                 if (currentPrice <= triggerPrice) { 
+                    double newSL = openPrice - (totalProfitDist * LockPositionPercent);
+                    if (newSL < currentSL - _Point) trade.PositionModify(ticket, newSL, currentTP); 
+                 }
+             }
+         }
       } 
    } 
 }

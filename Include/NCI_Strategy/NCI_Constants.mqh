@@ -33,7 +33,7 @@ input bool Simple_UseTrendAlign   = true;  // Filter LTF trades with HTF Trend?
 input group "Sector B: Zone-in-Zone (ZiZ)"
 input bool Enable_ZiZ_Mode        = true; // If TRUE, IGNORES Sector A
 input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone
-input bool ZiZ_AllowStairStep     = true;  // [NEW] Trade LTF Zones ALIGNED with Trend (Floating)
+input bool ZiZ_AllowStairStep     = true;  // Trade LTF Zones ALIGNED with Trend (Floating)
 input bool ZiZ_AllowBreakout      = false; // Trade LTF Breakout Zone inside HTF Zone
 
 //--- 3. SHARED RISK SETTINGS (Global)
@@ -87,6 +87,11 @@ input double MaxBufferPoints  = 200;
 //--- 9. RISK MANAGEMENT
 input group "Risk Management"
 input bool   EnableProfitLocking = true;
-input double LockTriggerPercent  = 0.80;
-input double LockPositionPercent = 0.70;
+input double LockTriggerPercent  = 0.80; // % of Distance to TP
+input double LockPositionPercent = 0.70; // % of Distance to TP
+
+// *** NEW: RR LOCKING ***
+input bool   Enable_RR_Locking   = false; // Enable locking based on Risk:Reward
+input double RR_Lock_Trigger     = 8.0;  // Trigger when Profit is 3x Risk (1:3)
+input double RR_Lock_Target      = 7.5;  // Lock Stop Loss at 1.5x Risk (1:1.5)
 input bool AllowTrading      = true; // Master Safety Switch
