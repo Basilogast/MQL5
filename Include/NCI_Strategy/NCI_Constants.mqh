@@ -84,14 +84,27 @@ input double BaseBufferPoints = 45.0;
 input double MinBufferPoints  = 20;   
 input double MaxBufferPoints  = 200;
 
-//--- 9. RISK MANAGEMENT
-input group "Risk Management"
+//--- 9. RISK MANAGEMENT (Basic)
+input group "Risk Management (Basic)"
 input bool   EnableProfitLocking = true;
 input double LockTriggerPercent  = 0.80; // % of Distance to TP
 input double LockPositionPercent = 0.70; // % of Distance to TP
+// OLD RR LOCKING (DISABLED)
+input bool   Enable_RR_Locking   = false; 
+input double RR_Lock_Trigger     = 6.0;  
+input double RR_Lock_Target      = 0.5;  
 
-// *** NEW: RR LOCKING ***
-input bool   Enable_RR_Locking   = false; // Enable locking based on Risk:Reward
-input double RR_Lock_Trigger     = 8.0;  // Trigger when Profit is 3x Risk (1:3)
-input double RR_Lock_Target      = 7.5;  // Lock Stop Loss at 1.5x Risk (1:1.5)
+//--- 10. SMART TRAILING & EXITS
+input group "Smart Trailing & Exits"
+// Smart Structure Trail (Stair-Step)
+input bool   Enable_Smart_Trail      = false;  // Trail SL behind new M15 Zones (H1 Targets only)
+input double Smart_Trail_Buffer_Pips = 45.0;  // Pips below/above new zone for SL placement
+// input double Smart_Trail_Confirm_Pips = REMOVED (Replaced by Breakout Logic)
+
+// Friday End-of-Week Close (Cash RR Logic)
+input bool   Enable_Friday_Close     = true;  // Close high profit trades on Friday
+input int    Friday_Close_Hour       = 20;    // Server hour to start checking
+input double Account_Initial_Balance = 10000.0; // FTMO Initial Balance for Risk Calc
+input double Friday_Min_RR           = 3.0;     // Close if Profit > (RiskAmount * 3.0)
+
 input bool AllowTrading      = true; // Master Safety Switch

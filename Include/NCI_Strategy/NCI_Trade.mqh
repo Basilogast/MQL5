@@ -236,9 +236,14 @@ void CheckTradeEntry()
    }
 }
 
-// *** UPDATED MANAGE POSITIONS ***
+// *** UPDATED MANAGE POSITIONS (With Cash RR & Breakout-Confirmation Trail) ***
 void ManageOpenPositions() { 
-   if (!EnableProfitLocking && !Enable_RR_Locking) return;
+   
+   // 1. Get Current Time for Friday Check
+   datetime currentTime = TimeCurrent();
+   MqlDateTime tm;
+   TimeToStruct(currentTime, tm);
+   bool isFridayCloseTime = (Enable_Friday_Close && tm.day_of_week == 5 && tm.hour >= Friday_Close_Hour);
    
    for(int i = PositionsTotal() - 1; i >= 0; i--) { 
       ulong ticket = PositionGetTicket(i);
@@ -248,81 +253,124 @@ void ManageOpenPositions() {
       
       long openTime = PositionGetInteger(POSITION_TIME); 
       long updateTime = PositionGetInteger(POSITION_TIME_UPDATE);
-      if (updateTime > openTime) continue; // Skip if already modified
+      if (updateTime > openTime) continue; 
       
       double openPrice = PositionGetDouble(POSITION_PRICE_OPEN); 
       double currentSL = PositionGetDouble(POSITION_SL);
       double currentTP = PositionGetDouble(POSITION_TP); 
       long type = PositionGetInteger(POSITION_TYPE); 
+      string comment = PositionGetString(POSITION_COMMENT);
       
       if (currentTP == 0) continue; 
-      
-      double currentPrice = 0;
-      bool rrLockTriggered = false;
-      double newSL_RR = 0;
 
-      if (type == POSITION_TYPE_BUY) { 
-         currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         
-         // 1. Check RR Locking
-         if (Enable_RR_Locking && currentSL < openPrice) { // Only if SL is still at risk
-             double riskDist = openPrice - currentSL;
-             if (riskDist > 0) {
-                 double profitDist = currentPrice - openPrice;
-                 double currentRR = profitDist / riskDist;
-                 if (currentRR >= RR_Lock_Trigger) {
-                     newSL_RR = openPrice + (riskDist * RR_Lock_Target);
-                     if (newSL_RR > currentSL + _Point) {
-                         trade.PositionModify(ticket, newSL_RR, currentTP);
-                         rrLockTriggered = true;
-                     }
+      double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+
+      // ==================================================================
+      // LOGIC 1: FRIDAY "CASH RR" CLOSE
+      // ==================================================================
+      if (isFridayCloseTime) {
+          double standardRiskAmount = Account_Initial_Balance * (RiskPercent / 100.0);
+          double currentProfitMoney = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);;
+          
+          if (currentProfitMoney >= (standardRiskAmount * Friday_Min_RR)) {
+              Print(">>> FRIDAY CLOSE: High RR Cash Hit. Ticket: ", ticket, " Profit: ", currentProfitMoney, " (Target: ", (standardRiskAmount * Friday_Min_RR), ")");
+              trade.PositionClose(ticket);
+              continue; 
+          }
+      }
+
+      // ==================================================================
+      // LOGIC 2: SMART STRUCTURE TRAIL (Stair-Step)
+      // Confirmed by BREAKOUT of opposing structure
+      // ==================================================================
+      // Filter: Applies to ZiZ-Swing, ZiZ-Step, and HTF (All H1 Targets)
+      bool isH1Target = (StringFind(comment, "Swing") >= 0 || StringFind(comment, "HTF") >= 0 || StringFind(comment, "Step") >= 0);
+      bool trailMoved = false;
+
+      if (Enable_Smart_Trail && isH1Target) {
+         if (type == POSITION_TYPE_BUY && activeDemand_LTF.isActive) {
+             double proposedSL = activeDemand_LTF.bottom - (Smart_Trail_Buffer_Pips * point);
+             if (proposedSL > currentSL + point) {
+                 // CONFIRMATION: Has Resistance (Supply) been Broken? 
+                 // If activeFlippedSupply_LTF is active, it means Supply was broken.
+                 if (activeFlippedSupply_LTF.isActive) {
+                     trade.PositionModify(ticket, proposedSL, currentTP);
+                     trailMoved = true;
+                     Print(">>> SMART TRAIL (BUY): Breakout Confirmed. Moved SL below new M15 Demand.");
                  }
              }
          }
+         else if (type == POSITION_TYPE_SELL && activeSupply_LTF.isActive) {
+             double proposedSL = activeSupply_LTF.top + (Smart_Trail_Buffer_Pips * point);
+             if (proposedSL < currentSL - point) {
+                 // CONFIRMATION: Has Support (Demand) been Broken?
+                 // If activeFlippedDemand_LTF is active, it means Demand was broken.
+                 if (activeFlippedDemand_LTF.isActive) {
+                     trade.PositionModify(ticket, proposedSL, currentTP);
+                     trailMoved = true;
+                     Print(">>> SMART TRAIL (SELL): Breakout Confirmed. Moved SL above new M15 Supply.");
+                 }
+             }
+         }
+      }
 
-         // 2. Check % Distance Locking (If RR didn't trigger)
-         if (!rrLockTriggered && EnableProfitLocking) {
+      // ==================================================================
+      // LOGIC 3: PERCENTAGE LOCKING (Fallback)
+      // ==================================================================
+      if (!trailMoved && EnableProfitLocking) {
+         if (type == POSITION_TYPE_BUY) { 
              double totalProfitDist = currentTP - openPrice; 
              if (totalProfitDist > 0) {
                  double triggerPrice = openPrice + (totalProfitDist * LockTriggerPercent);
-                 if (currentPrice >= triggerPrice) { 
+                 if (currentBid >= triggerPrice) { 
                     double newSL = openPrice + (totalProfitDist * LockPositionPercent);
-                    if (newSL > currentSL + _Point) trade.PositionModify(ticket, newSL, currentTP); 
+                    if (newSL > currentSL + point) trade.PositionModify(ticket, newSL, currentTP); 
                  }
              }
-         } 
-         
-      } else if (type == POSITION_TYPE_SELL) { 
-         currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         
-         // 1. Check RR Locking
-         if (Enable_RR_Locking && currentSL > openPrice) { // Only if SL is still at risk
-             double riskDist = currentSL - openPrice;
-             if (riskDist > 0) {
-                 double profitDist = openPrice - currentPrice;
-                 double currentRR = profitDist / riskDist;
-                 if (currentRR >= RR_Lock_Trigger) {
-                     newSL_RR = openPrice - (riskDist * RR_Lock_Target);
-                     if (newSL_RR < currentSL - _Point) {
-                         trade.PositionModify(ticket, newSL_RR, currentTP);
-                         rrLockTriggered = true;
+         } else if (type == POSITION_TYPE_SELL) { 
+             double totalProfitDist = openPrice - currentTP; 
+             if (totalProfitDist > 0) {
+                 double triggerPrice = openPrice - (totalProfitDist * LockTriggerPercent);
+                 if (currentAsk <= triggerPrice) { 
+                    double newSL = openPrice - (totalProfitDist * LockPositionPercent);
+                    if (newSL < currentSL - point) trade.PositionModify(ticket, newSL, currentTP); 
+                 }
+             }
+         }
+      }
+      
+      // ==================================================================
+      // LOGIC 4: OLD RR LOCKING (Backup - Currently Disabled in Constants)
+      // ==================================================================
+      if (!trailMoved && Enable_RR_Locking) {
+         double newSL_RR = 0;
+         if (type == POSITION_TYPE_BUY) {
+             if (currentSL < openPrice) { 
+                 double riskDist = openPrice - currentSL;
+                 if (riskDist > 0) {
+                     double profitDist = currentBid - openPrice;
+                     if ((profitDist / riskDist) >= RR_Lock_Trigger) {
+                         newSL_RR = openPrice + (riskDist * RR_Lock_Target);
+                         if (newSL_RR > currentSL + point) trade.PositionModify(ticket, newSL_RR, currentTP);
                      }
                  }
              }
          }
-
-         // 2. Check % Distance Locking (If RR didn't trigger)
-         if (!rrLockTriggered && EnableProfitLocking) {
-             double totalProfitDist = openPrice - currentTP; 
-             if (totalProfitDist > 0) {
-                 double triggerPrice = openPrice - (totalProfitDist * LockTriggerPercent);
-                 if (currentPrice <= triggerPrice) { 
-                    double newSL = openPrice - (totalProfitDist * LockPositionPercent);
-                    if (newSL < currentSL - _Point) trade.PositionModify(ticket, newSL, currentTP); 
+         else if (type == POSITION_TYPE_SELL) {
+             if (currentSL > openPrice) { 
+                 double riskDist = currentSL - openPrice;
+                 if (riskDist > 0) {
+                     double profitDist = openPrice - currentAsk;
+                     if ((profitDist / riskDist) >= RR_Lock_Trigger) {
+                         newSL_RR = openPrice - (riskDist * RR_Lock_Target);
+                         if (newSL_RR < currentSL - point) trade.PositionModify(ticket, newSL_RR, currentTP);
+                     }
                  }
              }
          }
-      } 
+      }
    } 
 }
 
