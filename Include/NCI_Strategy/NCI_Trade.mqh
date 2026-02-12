@@ -54,7 +54,7 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
       
-      // [NEW] EXPLICIT LOGGING TO JOURNAL TAB
+      // EXPLICIT LOGGING TO JOURNAL TAB
       Print(">>> TRADE OPENED | Ticket: ", CurrentOpenTicket, 
             " | Strategy: ", comment, 
             " | Type: ", (type==ORDER_TYPE_BUY ? "BUY" : "SELL"),
@@ -180,7 +180,6 @@ void CheckTradeEntry()
       }
    }
 
-   // [UPDATED] Check against variable MaxOpenTrades instead of hardcoded 0
    if (PositionsTotal() >= MaxOpenTrades) return;
    
    if (!AllowTrading) return;
@@ -189,18 +188,39 @@ void CheckTradeEntry()
       if (ZiZ_AllowTrend) {
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
              if (currentMarketTrend_HTF == 1) {
+                 // WITH TREND: Swing Buy (Strongest)
                  bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
                  if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
              } else {
-                 ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                 // COUNTER TREND: Scalp Buy (Riskier)
+                 bool allowTrade = true;
+                 
+                 // [TOXIC FILTER]: Block if M15 is UP (Chasing Pullback)
+                 if (UseToxicFilter && currentMarketTrend_LTF == 1) allowTrade = false;
+                 
+                 if (allowTrade) {
+                    ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                 }
              }
          }
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
              if (currentMarketTrend_HTF == -1) {
+                 // WITH TREND: Swing Sell (Strongest)
                  bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
                  if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
              } else {
-                 ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                 // COUNTER TREND: Scalp Sell (Riskier)
+                 bool allowTrade = true;
+                 
+                 // [TOXIC FILTER]: Block if M15 is DOWN or Neutral (Chasing Drop)
+                 // NOTE: H1 is UP (1). We are Selling.
+                 // We only want to Sell if M15 is UP (1) (Top of Pullback).
+                 // We BLOCK if M15 is Down (-1) or Neutral (0).
+                 if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
+                 
+                 if (allowTrade) {
+                    ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                 }
              }
          }
       }

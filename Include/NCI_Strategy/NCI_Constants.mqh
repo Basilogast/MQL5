@@ -35,6 +35,7 @@ input bool Enable_ZiZ_Mode        = true; // If TRUE, IGNORES Sector A
 input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone
 input bool ZiZ_AllowStairStep     = true;  // Trade LTF Zones ALIGNED with Trend (Floating)
 input bool ZiZ_AllowBreakout      = false; // Trade LTF Breakout Zone inside HTF Zone
+input bool UseToxicFilter         = true;  // [NEW] Block bad Counter-Trend Scalps
 
 //--- 3. SHARED RISK SETTINGS (Global)
 input group "Shared Risk Settings"
