@@ -180,7 +180,9 @@ void CheckTradeEntry()
       }
    }
 
-   if (PositionsTotal() > 0) return;
+   // [UPDATED] Check against variable MaxOpenTrades instead of hardcoded 0
+   if (PositionsTotal() >= MaxOpenTrades) return;
+   
    if (!AllowTrading) return;
 
    if (Enable_ZiZ_Mode) {

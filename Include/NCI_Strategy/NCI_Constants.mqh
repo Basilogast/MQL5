@@ -86,13 +86,14 @@ input double MaxBufferPoints  = 200;
 
 //--- 9. RISK MANAGEMENT (Basic)
 input group "Risk Management (Basic)"
+input int    MaxOpenTrades       = 1;    // [NEW] Max simultaneous trades allowed
 input bool   EnableProfitLocking = true;
 // Standard Trades (Swing/Scalp)
 input double LockTriggerPercent  = 0.80; // % of Distance to TP
 input double LockPositionPercent = 0.70; // % of Distance to TP
 // Stair-Step Trades (High RR)
-input double Step_LockTriggerPercent  = 0.65; // [NEW] Trigger for Stair-Step
-input double Step_LockPositionPercent = 0.60; // [NEW] Lock for Stair-Step
+input double Step_LockTriggerPercent  = 0.62; // Trigger closer to lock
+input double Step_LockPositionPercent = 0.60; // Lock stays at 60%
 
 // OLD RR LOCKING (DISABLED)
 input bool   Enable_RR_Locking   = false; 
