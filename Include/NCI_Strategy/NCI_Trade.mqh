@@ -90,6 +90,8 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
+   // STANDARD TOUCH / LIMIT ENTRY LOGIC
+   // ----------------------------------------------------
    double zoneHeightPrice = entryZone.top - entryZone.bottom;
    double zoneHeightPips = zoneHeightPrice / point;
    if (zoneHeightPips <= 0) zoneHeightPips = 1;
@@ -155,6 +157,22 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
 // *** MAIN CHECK FUNCTION ***
 void CheckTradeEntry()
 {
+   // --- TIME FILTER CHECK ---
+   if (UseTimeFilter) {
+      datetime currentTime = TimeCurrent();
+      MqlDateTime tm;
+      TimeToStruct(currentTime, tm);
+      
+      // If StartHour < EndHour (e.g., 07:00 to 16:00), simply check if within range
+      if (StartHour < EndHour) {
+         if (tm.hour < StartHour || tm.hour >= EndHour) return; 
+      }
+      // If StartHour > EndHour (e.g., 22:00 to 08:00 overnight), logic flips
+      else {
+         if (tm.hour < StartHour && tm.hour >= EndHour) return;
+      }
+   }
+
    if (PositionsTotal() > 0) return;
    if (!AllowTrading) return;
 
@@ -272,7 +290,7 @@ void ManageOpenPositions() {
       // ==================================================================
       if (isFridayCloseTime) {
           double standardRiskAmount = Account_Initial_Balance * (RiskPercent / 100.0);
-          double currentProfitMoney = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);;
+          double currentProfitMoney = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
           
           if (currentProfitMoney >= (standardRiskAmount * Friday_Min_RR)) {
               Print(">>> FRIDAY CLOSE: High RR Cash Hit. Ticket: ", ticket, " Profit: ", currentProfitMoney, " (Target: ", (standardRiskAmount * Friday_Min_RR), ")");
@@ -285,7 +303,6 @@ void ManageOpenPositions() {
       // LOGIC 2: SMART STRUCTURE TRAIL (Stair-Step)
       // Confirmed by BREAKOUT of opposing structure
       // ==================================================================
-      // Filter: Applies to ZiZ-Swing, ZiZ-Step, and HTF (All H1 Targets)
       bool isH1Target = (StringFind(comment, "Swing") >= 0 || StringFind(comment, "HTF") >= 0 || StringFind(comment, "Step") >= 0);
       bool trailMoved = false;
 
@@ -293,8 +310,6 @@ void ManageOpenPositions() {
          if (type == POSITION_TYPE_BUY && activeDemand_LTF.isActive) {
              double proposedSL = activeDemand_LTF.bottom - (Smart_Trail_Buffer_Pips * point);
              if (proposedSL > currentSL + point) {
-                 // CONFIRMATION: Has Resistance (Supply) been Broken? 
-                 // If activeFlippedSupply_LTF is active, it means Supply was broken.
                  if (activeFlippedSupply_LTF.isActive) {
                      trade.PositionModify(ticket, proposedSL, currentTP);
                      trailMoved = true;
@@ -305,8 +320,6 @@ void ManageOpenPositions() {
          else if (type == POSITION_TYPE_SELL && activeSupply_LTF.isActive) {
              double proposedSL = activeSupply_LTF.top + (Smart_Trail_Buffer_Pips * point);
              if (proposedSL < currentSL - point) {
-                 // CONFIRMATION: Has Support (Demand) been Broken?
-                 // If activeFlippedDemand_LTF is active, it means Demand was broken.
                  if (activeFlippedDemand_LTF.isActive) {
                      trade.PositionModify(ticket, proposedSL, currentTP);
                      trailMoved = true;

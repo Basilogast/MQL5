@@ -69,6 +69,7 @@ input int    MaxCandleSizePips = 80;
 
 //--- 7. SCALING & ENTRY
 input group "Entry Logic"
+// Removed Use_Confirmation_Entry
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
@@ -97,14 +98,19 @@ input double RR_Lock_Target      = 0.5;
 //--- 10. SMART TRAILING & EXITS
 input group "Smart Trailing & Exits"
 // Smart Structure Trail (Stair-Step)
-input bool   Enable_Smart_Trail      = false;  // Trail SL behind new M15 Zones (H1 Targets only)
-input double Smart_Trail_Buffer_Pips = 45.0;  // Pips below/above new zone for SL placement
-// input double Smart_Trail_Confirm_Pips = REMOVED (Replaced by Breakout Logic)
+input bool   Enable_Smart_Trail      = false; // [DISABLED]
+input double Smart_Trail_Buffer_Pips = 10.0;  
 
 // Friday End-of-Week Close (Cash RR Logic)
 input bool   Enable_Friday_Close     = true;  // Close high profit trades on Friday
 input int    Friday_Close_Hour       = 20;    // Server hour to start checking
 input double Account_Initial_Balance = 10000.0; // FTMO Initial Balance for Risk Calc
 input double Friday_Min_RR           = 3.0;     // Close if Profit > (RiskAmount * 3.0)
+
+//--- 11. TIME FILTER (NEW)
+input group "Time Filter Settings"
+input bool   UseTimeFilter = true; // Enable Session Filtering
+input int    StartHour     = 7;    // Start Trading (Server Time)
+input int    EndHour       = 16;   // Stop Entering New Trades (Server Time)
 
 input bool AllowTrading      = true; // Master Safety Switch
