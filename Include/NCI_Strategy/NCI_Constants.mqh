@@ -86,7 +86,7 @@ input double MaxBufferPoints  = 200;
 
 //--- 9. RISK MANAGEMENT (Basic)
 input group "Risk Management (Basic)"
-input int    MaxOpenTrades       = 1;    // [NEW] Max simultaneous trades allowed
+input int    MaxOpenTrades       = 2;    // [NEW] Max simultaneous trades allowed
 input bool   EnableProfitLocking = true;
 // Standard Trades (Swing/Scalp)
 input double LockTriggerPercent  = 0.80; // % of Distance to TP
