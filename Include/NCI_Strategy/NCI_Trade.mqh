@@ -290,7 +290,7 @@ void ManageOpenPositions() {
       // ==================================================================
       if (isFridayCloseTime) {
           double standardRiskAmount = Account_Initial_Balance * (RiskPercent / 100.0);
-          double currentProfitMoney = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
+          double currentProfitMoney = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
           
           if (currentProfitMoney >= (standardRiskAmount * Friday_Min_RR)) {
               Print(">>> FRIDAY CLOSE: High RR Cash Hit. Ticket: ", ticket, " Profit: ", currentProfitMoney, " (Target: ", (standardRiskAmount * Friday_Min_RR), ")");
@@ -333,21 +333,32 @@ void ManageOpenPositions() {
       // LOGIC 3: PERCENTAGE LOCKING (Fallback)
       // ==================================================================
       if (!trailMoved && EnableProfitLocking) {
+         
+         // DEFINE LOCK PARAMETERS BASED ON STRATEGY TYPE
+         double activeTriggerPct = LockTriggerPercent; // Default (0.80)
+         double activeLockPct    = LockPositionPercent; // Default (0.70)
+         
+         // If it is a Stair-Step Trade (Step), use tighter locking
+         if (StringFind(comment, "Step") >= 0) {
+             activeTriggerPct = Step_LockTriggerPercent; // (0.65)
+             activeLockPct    = Step_LockPositionPercent; // (0.60)
+         }
+
          if (type == POSITION_TYPE_BUY) { 
              double totalProfitDist = currentTP - openPrice; 
              if (totalProfitDist > 0) {
-                 double triggerPrice = openPrice + (totalProfitDist * LockTriggerPercent);
+                 double triggerPrice = openPrice + (totalProfitDist * activeTriggerPct);
                  if (currentBid >= triggerPrice) { 
-                    double newSL = openPrice + (totalProfitDist * LockPositionPercent);
+                    double newSL = openPrice + (totalProfitDist * activeLockPct);
                     if (newSL > currentSL + point) trade.PositionModify(ticket, newSL, currentTP); 
                  }
              }
          } else if (type == POSITION_TYPE_SELL) { 
              double totalProfitDist = openPrice - currentTP; 
              if (totalProfitDist > 0) {
-                 double triggerPrice = openPrice - (totalProfitDist * LockTriggerPercent);
+                 double triggerPrice = openPrice - (totalProfitDist * activeTriggerPct);
                  if (currentAsk <= triggerPrice) { 
-                    double newSL = openPrice - (totalProfitDist * LockPositionPercent);
+                    double newSL = openPrice - (totalProfitDist * activeLockPct);
                     if (newSL < currentSL - point) trade.PositionModify(ticket, newSL, currentTP); 
                  }
              }

@@ -69,7 +69,6 @@ input int    MaxCandleSizePips = 80;
 
 //--- 7. SCALING & ENTRY
 input group "Entry Logic"
-// Removed Use_Confirmation_Entry
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
@@ -88,8 +87,13 @@ input double MaxBufferPoints  = 200;
 //--- 9. RISK MANAGEMENT (Basic)
 input group "Risk Management (Basic)"
 input bool   EnableProfitLocking = true;
+// Standard Trades (Swing/Scalp)
 input double LockTriggerPercent  = 0.80; // % of Distance to TP
 input double LockPositionPercent = 0.70; // % of Distance to TP
+// Stair-Step Trades (High RR)
+input double Step_LockTriggerPercent  = 0.65; // [NEW] Trigger for Stair-Step
+input double Step_LockPositionPercent = 0.60; // [NEW] Lock for Stair-Step
+
 // OLD RR LOCKING (DISABLED)
 input bool   Enable_RR_Locking   = false; 
 input double RR_Lock_Trigger     = 6.0;  
@@ -107,7 +111,7 @@ input int    Friday_Close_Hour       = 20;    // Server hour to start checking
 input double Account_Initial_Balance = 10000.0; // FTMO Initial Balance for Risk Calc
 input double Friday_Min_RR           = 3.0;     // Close if Profit > (RiskAmount * 3.0)
 
-//--- 11. TIME FILTER (NEW)
+//--- 11. TIME FILTER
 input group "Time Filter Settings"
 input bool   UseTimeFilter = true; // Enable Session Filtering
 input int    StartHour     = 7;    // Start Trading (Server Time)
