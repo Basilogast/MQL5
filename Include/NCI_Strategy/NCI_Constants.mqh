@@ -35,7 +35,7 @@ input bool Enable_ZiZ_Mode        = true; // If TRUE, IGNORES Sector A
 input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone
 input bool ZiZ_AllowStairStep     = true;  // Trade LTF Zones ALIGNED with Trend (Floating)
 input bool ZiZ_AllowBreakout      = false; // Trade LTF Breakout Zone inside HTF Zone
-input bool UseToxicFilter         = true;  // [NEW] Block bad Counter-Trend Scalps
+input bool UseToxicFilter         = true;  // Block bad Counter-Trend Scalps
 
 //--- 3. SHARED RISK SETTINGS (Global)
 input group "Shared Risk Settings"
@@ -87,7 +87,7 @@ input double MaxBufferPoints  = 200;
 
 //--- 9. RISK MANAGEMENT (Basic)
 input group "Risk Management (Basic)"
-input int    MaxOpenTrades       = 2;    // [NEW] Max simultaneous trades allowed
+input int    MaxOpenTrades       = 2;    // Max simultaneous trades allowed
 input bool   EnableProfitLocking = true;
 // Standard Trades (Swing/Scalp)
 input double LockTriggerPercent  = 0.80; // % of Distance to TP
@@ -96,10 +96,11 @@ input double LockPositionPercent = 0.70; // % of Distance to TP
 input double Step_LockTriggerPercent  = 0.62; // Trigger closer to lock
 input double Step_LockPositionPercent = 0.60; // Lock stays at 60%
 
-// OLD RR LOCKING (DISABLED)
-input bool   Enable_RR_Locking   = false; 
-input double RR_Lock_Trigger     = 6.0;  
-input double RR_Lock_Target      = 0.5;  
+// RR LOCKING (Backup - Now Step-Specific capable)
+input bool   Enable_RR_Locking   = true;  // [ENABLED]
+input bool   RR_Lock_Step_Only   = false;  // [NEW] If true, RR lock ONLY applies to Step trades
+input double RR_Lock_Trigger     = 4.0;   // [DEFAULT] Trigger at 1:3 RR
+input double RR_Lock_Target      = 3.5;   // [DEFAULT] Lock at 0.1 RR (Breakeven + Buffer)
 
 //--- 10. SMART TRAILING & EXITS
 input group "Smart Trailing & Exits"

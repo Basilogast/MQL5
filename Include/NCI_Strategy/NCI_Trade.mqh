@@ -213,9 +213,6 @@ void CheckTradeEntry()
                  bool allowTrade = true;
                  
                  // [TOXIC FILTER]: Block if M15 is DOWN or Neutral (Chasing Drop)
-                 // NOTE: H1 is UP (1). We are Selling.
-                 // We only want to Sell if M15 is UP (1) (Top of Pullback).
-                 // We BLOCK if M15 is Down (-1) or Neutral (0).
                  if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
                  
                  if (allowTrade) {
@@ -369,7 +366,7 @@ void ManageOpenPositions() {
          
          // If it is a Stair-Step Trade (Step), use tighter locking
          if (StringFind(comment, "Step") >= 0) {
-             activeTriggerPct = Step_LockTriggerPercent; // (0.65)
+             activeTriggerPct = Step_LockTriggerPercent; // (0.62)
              activeLockPct    = Step_LockPositionPercent; // (0.60)
          }
 
@@ -395,33 +392,41 @@ void ManageOpenPositions() {
       }
       
       // ==================================================================
-      // LOGIC 4: OLD RR LOCKING (Backup - Currently Disabled in Constants)
+      // LOGIC 4: RR LOCKING (Backup - Now Step-Specific capable)
       // ==================================================================
       if (!trailMoved && Enable_RR_Locking) {
-         double newSL_RR = 0;
-         if (type == POSITION_TYPE_BUY) {
-             if (currentSL < openPrice) { 
-                 double riskDist = openPrice - currentSL;
-                 if (riskDist > 0) {
-                     double profitDist = currentBid - openPrice;
-                     if ((profitDist / riskDist) >= RR_Lock_Trigger) {
-                         newSL_RR = openPrice + (riskDist * RR_Lock_Target);
-                         if (newSL_RR > currentSL + point) trade.PositionModify(ticket, newSL_RR, currentTP);
-                     }
-                 }
-             }
-         }
-         else if (type == POSITION_TYPE_SELL) {
-             if (currentSL > openPrice) { 
-                 double riskDist = currentSL - openPrice;
-                 if (riskDist > 0) {
-                     double profitDist = openPrice - currentAsk;
-                     if ((profitDist / riskDist) >= RR_Lock_Trigger) {
-                         newSL_RR = openPrice - (riskDist * RR_Lock_Target);
-                         if (newSL_RR < currentSL - point) trade.PositionModify(ticket, newSL_RR, currentTP);
-                     }
-                 }
-             }
+         
+         // [NEW] CHECK: If toggle is ON, limit this logic to Step trades only
+         if (RR_Lock_Step_Only && StringFind(comment, "Step") < 0) {
+            // Do nothing: This is NOT a step trade, so we skip RR locking
+         } 
+         else {
+            // EXECUTE RR LOGIC
+            double newSL_RR = 0;
+            if (type == POSITION_TYPE_BUY) {
+                if (currentSL < openPrice) { 
+                    double riskDist = openPrice - currentSL;
+                    if (riskDist > 0) {
+                        double profitDist = currentBid - openPrice;
+                        if ((profitDist / riskDist) >= RR_Lock_Trigger) {
+                            newSL_RR = openPrice + (riskDist * RR_Lock_Target);
+                            if (newSL_RR > currentSL + point) trade.PositionModify(ticket, newSL_RR, currentTP);
+                        }
+                    }
+                }
+            }
+            else if (type == POSITION_TYPE_SELL) {
+                if (currentSL > openPrice) { 
+                    double riskDist = currentSL - openPrice;
+                    if (riskDist > 0) {
+                        double profitDist = openPrice - currentAsk;
+                        if ((profitDist / riskDist) >= RR_Lock_Trigger) {
+                            newSL_RR = openPrice - (riskDist * RR_Lock_Target);
+                            if (newSL_RR < currentSL - point) trade.PositionModify(ticket, newSL_RR, currentTP);
+                        }
+                    }
+                }
+            }
          }
       }
    } 
