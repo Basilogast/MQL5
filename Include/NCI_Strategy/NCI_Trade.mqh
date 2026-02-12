@@ -53,6 +53,13 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, finalComment)) {
       CurrentOpenTicket = trade.ResultOrder();
       CurrentZoneTradeCount++; 
+      
+      // [NEW] EXPLICIT LOGGING TO JOURNAL TAB
+      Print(">>> TRADE OPENED | Ticket: ", CurrentOpenTicket, 
+            " | Strategy: ", comment, 
+            " | Type: ", (type==ORDER_TYPE_BUY ? "BUY" : "SELL"),
+            " | Price: ", DoubleToString(price, 5));
+      
       return true;
    }
    return false;
@@ -419,6 +426,7 @@ void ManageTradeState() {
    } 
 }
 
+// *** UPDATED EXPORT FUNCTION ***
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
@@ -426,7 +434,8 @@ void ExportTransactionsToCSV()
    
    if(file_handle != INVALID_HANDLE)
    {
-      FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "Profit", "Comment", "H1 Trend", "M15 Trend");
+      // [NEW] Added "Strategy" Column header
+      FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "Profit", "Strategy", "Comment", "H1 Trend", "M15 Trend");
       
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
@@ -440,6 +449,14 @@ void ExportTransactionsToCSV()
          {
             string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
+            
+            // [NEW] Logic to Extract Strategy Type
+            string strategyType = "OTHER";
+            if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
+            else if (StringFind(rawComment, "Swing") >= 0) strategyType = "SWING";
+            else if (StringFind(rawComment, "Scalp") >= 0) strategyType = "SCALP";
+            else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
+            else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT";
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
@@ -469,6 +486,7 @@ void ExportTransactionsToCSV()
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_VOLUME), 2),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PRICE), 5),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PROFIT), 2),
+               strategyType, // [NEW] Write the strategy column
                rawComment, 
                h1_trend,   
                m15_trend   
