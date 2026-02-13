@@ -224,10 +224,14 @@ void CheckTradeEntry()
 
       if (ZiZ_AllowStairStep) {
          if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
+             // BUY STEP: Always Allowed
              ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
          }
          if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-             ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+             // SELL STEP: Gated by ZiZ_AllowStepSell Toggle
+             if (ZiZ_AllowStepSell) {
+                ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+             }
          }
       }
       
@@ -453,7 +457,7 @@ void ManageTradeState() {
    } 
 }
 
-// *** UPDATED EXPORT FUNCTION ***
+// *** UPDATED EXPORT FUNCTION (With Commission & Swap) ***
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
@@ -461,8 +465,8 @@ void ExportTransactionsToCSV()
    
    if(file_handle != INVALID_HANDLE)
    {
-      // [NEW] Added "Strategy" Column header
-      FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "Profit", "Strategy", "Comment", "H1 Trend", "M15 Trend");
+      // [NEW] Added "Commission", "Swap", "NetProfit" Columns
+      FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "RawProfit", "Commission", "Swap", "NetProfit", "Strategy", "Comment", "H1 Trend", "M15 Trend");
       
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
@@ -477,7 +481,7 @@ void ExportTransactionsToCSV()
             string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
             
-            // [NEW] Logic to Extract Strategy Type
+            // Extract Strategy Type
             string strategyType = "OTHER";
             if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
             else if (StringFind(rawComment, "Swing") >= 0) strategyType = "SWING";
@@ -488,23 +492,26 @@ void ExportTransactionsToCSV()
             string h1_trend = "N/A";
             string m15_trend = "N/A";
             
+            // Extract Trend Tags
             int startIdx = StringFind(rawComment, "[H:");
             if (startIdx >= 0) {
                string sub = StringSubstr(rawComment, startIdx + 3); 
                int spaceIdx = StringFind(sub, " ");
                if (spaceIdx > 0) {
                    h1_trend = StringSubstr(sub, 0, spaceIdx); 
-                   
                    int m15Idx = StringFind(sub, "M:");
                    if (m15Idx > 0) {
                        string sub2 = StringSubstr(sub, m15Idx + 2);
                        int closeBracket = StringFind(sub2, "]");
-                       if (closeBracket > 0) {
-                           m15_trend = StringSubstr(sub2, 0, closeBracket); 
-                       }
+                       if (closeBracket > 0) m15_trend = StringSubstr(sub2, 0, closeBracket); 
                    }
                }
             }
+
+            double rawProfit = HistoryDealGetDouble(ticket_deal, DEAL_PROFIT);
+            double comm = HistoryDealGetDouble(ticket_deal, DEAL_COMMISSION);
+            double swap = HistoryDealGetDouble(ticket_deal, DEAL_SWAP);
+            double netProfit = rawProfit + comm + swap;
 
             FileWrite(file_handle, 
                (string)HistoryDealGetInteger(ticket_deal, DEAL_TIME),
@@ -512,15 +519,17 @@ void ExportTransactionsToCSV()
                sType,
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_VOLUME), 2),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PRICE), 5),
-               DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PROFIT), 2),
-               strategyType, // [NEW] Write the strategy column
+               DoubleToString(rawProfit, 2),
+               DoubleToString(comm, 2),    // [NEW]
+               DoubleToString(swap, 2),    // [NEW]
+               DoubleToString(netProfit, 2), // [NEW] - Real Profit
+               strategyType, 
                rawComment, 
                h1_trend,   
                m15_trend   
             );
          }
       }
-      
       FileClose(file_handle);
       Print(">> Exported Trade Journal to: " + filename);
    }

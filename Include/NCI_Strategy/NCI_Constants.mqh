@@ -32,8 +32,9 @@ input bool Simple_UseTrendAlign   = true;  // Filter LTF trades with HTF Trend?
 //--- 2. SECTOR B: ADVANCED STRATEGY (The Sniper)
 input group "Sector B: Zone-in-Zone (ZiZ)"
 input bool Enable_ZiZ_Mode        = true; // If TRUE, IGNORES Sector A
-input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone
-input bool ZiZ_AllowStairStep     = true;  // Trade LTF Zones ALIGNED with Trend (Floating)
+input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone (Swings)
+input bool ZiZ_AllowStairStep     = true;  // Trade LTF Zones ALIGNED with Trend (Steps)
+input bool ZiZ_AllowStepSell      = false; // [NEW] Master Switch to BLOCK Step Sells (Profit Killer)
 input bool ZiZ_AllowBreakout      = false; // Trade LTF Breakout Zone inside HTF Zone
 input bool UseToxicFilter         = true;  // Block bad Counter-Trend Scalps
 
@@ -93,14 +94,14 @@ input bool   EnableProfitLocking = true;
 input double LockTriggerPercent  = 0.80; // % of Distance to TP
 input double LockPositionPercent = 0.70; // % of Distance to TP
 // Stair-Step Trades (High RR)
-input double Step_LockTriggerPercent  = 0.62; // Trigger closer to lock
-input double Step_LockPositionPercent = 0.60; // Lock stays at 60%
+input double Step_LockTriggerPercent  = 0.60; // Trigger closer to lock
+input double Step_LockPositionPercent = 0.55;
 
 // RR LOCKING (Backup - Now Step-Specific capable)
 input bool   Enable_RR_Locking   = true;  // [ENABLED]
 input bool   RR_Lock_Step_Only   = false;  // [NEW] If true, RR lock ONLY applies to Step trades
-input double RR_Lock_Trigger     = 4.0;   // [DEFAULT] Trigger at 1:3 RR
-input double RR_Lock_Target      = 3.5;   // [DEFAULT] Lock at 0.1 RR (Breakeven + Buffer)
+input double RR_Lock_Trigger     = 4.0;   // [OPTIMIZED] Trigger at 1:4 RR
+input double RR_Lock_Target      = 3.5;   // [OPTIMIZED] Bank at 1:3.5 RR
 
 //--- 10. SMART TRAILING & EXITS
 input group "Smart Trailing & Exits"
