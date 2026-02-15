@@ -64,9 +64,53 @@ bool IsBigCandle(ENUM_TIMEFRAMES tf, int index) {
    if(c==0)return false; return(b>(s/c)*BigCandleFactor);
 }
 
-// --- RESTORED & UPDATED FUNCTIONS ---
+// ==================================================================
+// [NEW] ADR FILTER (Average Daily Range)
+// Checks both FLOOR (Min) and CEILING (Max)
+// ==================================================================
+bool CheckADRFilter() {
+   if (!Use_ADR_Filter) return true; // Pass if filter is disabled
 
-// 1. IsNewBar (Checks Current Chart Timeframe)
+   double dailyHighs[];
+   double dailyLows[];
+   
+   // We need 'ADR_Period' days of data
+   // We use PERIOD_D1
+   // Copy from index 1 (yesterday) to exclude incomplete current day
+   if(CopyHigh(_Symbol, PERIOD_D1, 1, ADR_Period, dailyHighs) < ADR_Period || 
+      CopyLow(_Symbol, PERIOD_D1, 1, ADR_Period, dailyLows) < ADR_Period) {
+       Print("Error copying Daily price data for ADR");
+       return true; // Fail safe
+   }
+   
+   double sumRange = 0;
+   for(int i=0; i<ADR_Period; i++) {
+      sumRange += (dailyHighs[i] - dailyLows[i]);
+   }
+   
+   double avgRangePoints = sumRange / ADR_Period;
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   // Convert to Pips (Standard 10 points = 1 pip logic)
+   double pips = avgRangePoints / point / 10.0;
+   
+   // 1. CHECK FLOOR (Is it too quiet?)
+   if (pips < ADR_Min_Pips) {
+       // Print(">>> ADR BLOCK: Market Sleeping. Current: ", pips, " Min: ", ADR_Min_Pips);
+       return false;
+   }
+
+   // 2. CHECK CEILING (Is it too violent?)
+   if (pips > ADR_Max_Pips) {
+       // Print(">>> ADR BLOCK: Market Violent. Current: ", pips, " Max: ", ADR_Max_Pips);
+       return false;
+   }
+   
+   return true;
+}
+// ==================================================================
+
+// --- UTILITY FUNCTIONS ---
 bool IsNewBar() { 
    static datetime last; 
    datetime curr=(datetime)SeriesInfoInteger(_Symbol,_Period,SERIES_LASTBAR_DATE); 
@@ -74,22 +118,24 @@ bool IsNewBar() {
    return false;
 }
 
-// 2. CheckVolatility (Updated to use _Period for GetHigh/GetLow)
 bool CheckVolatility() {
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if (point == 0) return false;
+
+   // Check Spread
    int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if (spread > MaxSpreadPoints) return false;
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   // We use _Period here because volatility checks are usually for the current execution chart
-   double size0 = (GetHigh(_Period, 0) - GetLow(_Period, 0)) / point / 10.0;
-   double size1 = (GetHigh(_Period, 1) - GetLow(_Period, 1)) / point / 10.0; 
+   // Check Candle Size (Current and Previous)
+   double size0 = (GetHigh(_Period, 0) - GetLow(_Period, 0)) / point; 
+   double size1 = (GetHigh(_Period, 1) - GetLow(_Period, 1)) / point; 
    
-   if (size0 > MaxCandleSizePips) return false;
-   if (size1 > MaxCandleSizePips) return false;
+   if ((size0/10.0) > MaxCandleSizePips) return false;
+   if ((size1/10.0) > MaxCandleSizePips) return false;
+   
    return true;
 }
 
-// --- SHARED LOGIC HELPERS ---
 void AddPoint(PointStruct &arr[], PointStruct &p) { 
    int s=ArraySize(arr); 
    ArrayResize(arr,s+1); arr[s]=p; 

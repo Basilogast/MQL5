@@ -77,6 +77,9 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    
    if (ZoneIsBurned) return false; 
 
+   // [NEW] ADR FILTER CHECK (The Goldilocks Zone)
+   if (!CheckADRFilter()) return false;
+
    double tradeRisk = RiskPercent;
    if (EntryMode == MODE_SINGLE) 
    {
@@ -531,10 +534,5 @@ void ExportTransactionsToCSV()
          }
       }
       FileClose(file_handle);
-      Print(">> Exported Trade Journal to: " + filename);
-   }
-   else
-   {
-      Print(">> Error opening file for export: ", GetLastError());
    }
 }

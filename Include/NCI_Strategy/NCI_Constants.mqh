@@ -63,11 +63,17 @@ input double MinBodyPercent = 0.50;
 input int MaxScanDistance   = 3;
 input double BigCandleFactor = 1.3; 
 
-//--- 6. VOLATILITY GUARD
-input group "Volatility Guard"
+//--- 6. VOLATILITY GUARD & FILTERS
+input group "Volatility Guard & Filters"
 input bool   UseVolatilityGuard = true; 
-input int    MaxSpreadPoints   = 30; 
-input int    MaxCandleSizePips = 80; 
+input int    MaxSpreadPoints    = 25;   // [OPTIMIZED] Strict spread filter (2.5 pips)
+input int    MaxCandleSizePips  = 25;   // [OPTIMIZED] Strict candle filter (25 pips)
+
+// [NEW] ADR FILTER (The Goldilocks Zone)
+input bool   Use_ADR_Filter     = true;         // [NEW] Enable ADR Filter
+input int    ADR_Period         = 5;            // [NEW] Days to average
+input double ADR_Min_Pips       = 70.0;         // [FLOOR] Too quiet? Don't trade.
+input double ADR_Max_Pips       = 85.0;         // [CEILING] Too violent? Don't trade.
 
 //--- 7. SCALING & ENTRY
 input group "Entry Logic"
@@ -95,7 +101,7 @@ input double LockTriggerPercent  = 0.80; // % of Distance to TP
 input double LockPositionPercent = 0.70; // % of Distance to TP
 // Stair-Step Trades (High RR)
 input double Step_LockTriggerPercent  = 0.60; // Trigger closer to lock
-input double Step_LockPositionPercent = 0.55;
+input double Step_LockPositionPercent = 0.55; // Lock stays at 55%
 
 // RR LOCKING (Backup - Now Step-Specific capable)
 input bool   Enable_RR_Locking   = true;  // [ENABLED]
