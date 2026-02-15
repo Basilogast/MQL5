@@ -44,11 +44,12 @@ input double RiskPercent     = 1.0;
 input double MinRiskReward   = 2.0;
 input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE; 
 
-//--- 4. VISUAL SETTINGS
+//--- 4. VISUAL SETTINGS (Updated)
 input group "Visual Settings"
-input int HistoryBars       = 5000;
-input int LineWidth         = 2;
-input bool DrawZones        = true;
+input bool Show_ZigZag_Lines = true;   // [NEW] Toggle ZigZag Lines (Turn OFF for speed)
+input bool Show_Zone_Boxes   = true;   // [NEW] Toggle Zone Boxes (Turn OFF for speed)
+input int  HistoryBars       = 5000;
+input int  LineWidth         = 2;
 
 color SupplyColor     = clrMaroon; 
 color DemandColor     = clrDarkGreen;
@@ -72,8 +73,8 @@ input int    MaxCandleSizePips  = 25;   // [OPTIMIZED] Strict candle filter (25 
 // [NEW] ADR FILTER (The Goldilocks Zone)
 input bool   Use_ADR_Filter     = true;         // [NEW] Enable ADR Filter
 input int    ADR_Period         = 5;            // [NEW] Days to average
-input double ADR_Min_Pips       = 70.0;         // [FLOOR] Too quiet? Don't trade.
-input double ADR_Max_Pips       = 85.0;         // [CEILING] Too violent? Don't trade.
+input double ADR_Min_Pips       = 70.0;         // [OPTIMIZED] Floor
+input double ADR_Max_Pips       = 85.0;         // [OPTIMIZED] Ceiling
 
 //--- 7. SCALING & ENTRY
 input group "Entry Logic"
@@ -101,7 +102,7 @@ input double LockTriggerPercent  = 0.80; // % of Distance to TP
 input double LockPositionPercent = 0.70; // % of Distance to TP
 // Stair-Step Trades (High RR)
 input double Step_LockTriggerPercent  = 0.60; // Trigger closer to lock
-input double Step_LockPositionPercent = 0.55; // Lock stays at 55%
+input double Step_LockPositionPercent = 0.55; // Lock stays at 60%
 
 // RR LOCKING (Backup - Now Step-Specific capable)
 input bool   Enable_RR_Locking   = true;  // [ENABLED]

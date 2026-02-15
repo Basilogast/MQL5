@@ -17,14 +17,17 @@ void MergeZone(MergedZoneState &state, PointStruct &p, int type) {
    state.startTime = p.time; state.lastBarIndex = p.barIndex; 
 }
 
-// *** UPDATED: VISUAL TOGGLE & SPEED FIX ***
+// *** UPDATED: VISUAL TOGGLE & SPEED FIX (MQL5 COMPLIANT) ***
 void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double bottom, int type, int id) { 
    if (top <= bottom) return; 
    
-   // --- SPEED FIX: Stop here if optimizing ---
+   // 1. GLOBAL SPEED TOGGLE
+   if (!Show_Zone_Boxes) return;
+
+   // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
 
-   // --- DASHBOARD CHECK ---
+   // 3. DASHBOARD CHECK (Preserved)
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
@@ -37,21 +40,28 @@ void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double 
        c = (type == 1) ? SupplyColor : DemandColor; 
    }
 
+   // MQL5 Fix: Changed OBJPROP_TIME2 to OBJPROP_TIME, 1
    if(ObjectFind(0,name)<0) { 
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bottom); 
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, (t2==0)?TimeCurrent():t2, bottom); 
       ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
       ObjectSetInteger(0, name, OBJPROP_FILL, true); 
       ObjectSetInteger(0, name, OBJPROP_BACK, true); 
       ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); 
-   } 
+   } else {
+      // Update End Time if object exists
+      ObjectSetInteger(0, name, OBJPROP_TIME, 1, (t2==0)?TimeCurrent():t2);
+   }
 }
 
 // *** UPDATED: VISUAL TOGGLE & SPEED FIX ***
 void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
-   // --- SPEED FIX: Stop here if optimizing ---
+   // 1. GLOBAL SPEED TOGGLE
+   if (!Show_Zone_Boxes) return;
+
+   // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
 
-   // --- DASHBOARD CHECK ---
+   // 3. DASHBOARD CHECK (Preserved)
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
@@ -59,6 +69,7 @@ void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
    color c = FlippedColor;
    if (suffix == "_HTF") c = clrSilver; 
 
+   // MQL5 Fix: Changed OBJPROP_TIME2 to OBJPROP_TIME, 1
    if(ObjectFind(0,name)<0) {
       ObjectCreate(0, name, OBJ_RECTANGLE, 0, state.startTime, state.top, endTime, state.bottom);
       ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
@@ -101,10 +112,10 @@ datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double target
    return 0; 
 }
 
-// *** UPDATED: LOGIC ONLY WHEN OPTIMIZING ***
+// *** UPDATED: VISUAL TOGGLE & SPEED FIX ***
 void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneState &activeSup, MergedZoneState &activeDem, MergedZoneState &activeFlipSup, MergedZoneState &activeFlipDem, string suffix) { 
-   // 1. SPEED FIX: Only delete objects if NOT optimizing
-   if (!MQLInfoInteger(MQL_OPTIMIZATION)) {
+   // 1. SPEED FIX: Only delete objects if NOT optimizing AND Global Toggle is ON
+   if (!MQLInfoInteger(MQL_OPTIMIZATION) && Show_Zone_Boxes) {
        ObjectsDeleteAll(0, "NCI_Zone_" + suffix);
        ObjectsDeleteAll(0, "NCI_Flip_" + suffix); 
    }
@@ -255,5 +266,6 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    activeSup = supply; 
    activeDem = demand; 
    
-   if(DrawZones && !MQLInfoInteger(MQL_OPTIMIZATION)) ChartRedraw(); 
+   // FIX: Changed 'DrawZones' to 'Show_Zone_Boxes'
+   if(!MQLInfoInteger(MQL_OPTIMIZATION) && Show_Zone_Boxes) ChartRedraw(); 
 }

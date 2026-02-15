@@ -24,11 +24,11 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
       bool brokenSupply = false; bool brokenDemand = false; 
       
       if (lastSupplyIdx != -1) {
-          brokenSupply = CheckForBreakout(tf, lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
+         brokenSupply = CheckForBreakout(tf, lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
       }
       
       if (lastDemandIdx != -1) {
-          brokenDemand = CheckForBreakout(tf, lastDemandIdx, p.barIndex, lastDemandLevel, -1);
+         brokenDemand = CheckForBreakout(tf, lastDemandIdx, p.barIndex, lastDemandLevel, -1);
       }
 
       if (runningTrend == -1) { if (brokenSupply) runningTrend = 0; } 
@@ -85,15 +85,19 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
    } 
 }
 
-// *** VISUAL UPDATE: Optimization Speed Fix ***
+// *** VISUAL UPDATE: Global Toggle + Dashboard Logic Preserved ***
 void DrawZigZagLines(string suffix, PointStruct &points[]) { 
-   // 1. SPEED FIX: Stop here if optimizing
+   // 1. GLOBAL SPEED TOGGLE (New)
+   if (!Show_ZigZag_Lines) return;
+
+   // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
 
-   // 2. Clear old objects regardless of state
+   // 3. Clear old objects regardless of dashboard state (Good practice)
    ObjectsDeleteAll(0, "NCI_ZZ_" + suffix); 
    
-   // 3. Check if this layer is disabled via Dashboard
+   // 4. DASHBOARD CHECK (Preserved)
+   // Assuming ShowHTF/ShowLTF are globals defined elsewhere or in dashboard include
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
