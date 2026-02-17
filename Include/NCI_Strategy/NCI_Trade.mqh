@@ -77,6 +77,20 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    
    if (ZoneIsBurned) return false; 
 
+   // [NEW] SPREAD DEBUG & FILTER
+   // =======================================================
+   long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   
+   if (Debug_Show_Spread) {
+       Print(">>> DEBUG SPREAD: Signal Detected. Current: ", currentSpread, " pts | Max: ", MaxSpreadPoints);
+   }
+
+   if (currentSpread > MaxSpreadPoints) {
+       if (Debug_Show_Spread) Print(">>> BLOCKED: Spread (", currentSpread, ") too high.");
+       return false;
+   }
+   // =======================================================
+
    // [NEW] ADR FILTER CHECK (The Goldilocks Zone)
    if (!CheckADRFilter()) return false;
 
@@ -139,7 +153,9 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : ""; 
-            return OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
+            bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
+            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent. Spread was: ", currentSpread, " pts.");
+            return res;
          }
       }
    }
@@ -157,7 +173,9 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : "";
-            return OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
+            bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
+            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent. Spread was: ", currentSpread, " pts.");
+            return res;
          }
       }
    }

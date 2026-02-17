@@ -68,6 +68,7 @@ input double BigCandleFactor = 1.3;
 input group "Volatility Guard & Filters"
 input bool   UseVolatilityGuard = true; 
 input int    MaxSpreadPoints    = 25;   // [OPTIMIZED] Strict spread filter (2.5 pips)
+input bool   Debug_Show_Spread  = true; // [NEW] Print Spread Log for every entry attempt
 input int    MaxCandleSizePips  = 25;   // [OPTIMIZED] Strict candle filter (25 pips)
 
 // [NEW] ADR FILTER (The Goldilocks Zone)
