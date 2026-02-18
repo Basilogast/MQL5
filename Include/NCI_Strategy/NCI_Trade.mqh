@@ -31,6 +31,9 @@ string GetTrendLabel(int trendVal) {
    return "Y"; 
 }
 
+// [DELETED DUPLICATE CheckVolatility HERE] 
+// It relies on the definition in NCI_Helpers.mqh
+
 // *** OPEN TRADE FUNCTION ***
 bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
@@ -78,7 +81,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    if (ZoneIsBurned) return false; 
 
    // [NEW] SPREAD DEBUG & FILTER
-   // =======================================================
    long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    
    if (Debug_Show_Spread) {
@@ -89,10 +91,8 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
        if (Debug_Show_Spread) Print(">>> BLOCKED: Spread (", currentSpread, ") too high.");
        return false;
    }
-   // =======================================================
-
-   // [NEW] ADR FILTER CHECK (The Goldilocks Zone)
-   if (!CheckADRFilter()) return false;
+   
+   // NOTE: ADR Check removed from here - it is now handled in CheckTradeEntry()
 
    double tradeRisk = RiskPercent;
    if (EntryMode == MODE_SINGLE) 
@@ -115,7 +115,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    // STANDARD TOUCH / LIMIT ENTRY LOGIC
-   // ----------------------------------------------------
    double zoneHeightPrice = entryZone.top - entryZone.bottom;
    double zoneHeightPips = zoneHeightPrice / point;
    if (zoneHeightPips <= 0) zoneHeightPips = 1;
@@ -154,7 +153,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : ""; 
             bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
-            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent. Spread was: ", currentSpread, " pts.");
+            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent.");
             return res;
          }
       }
@@ -174,7 +173,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : "";
             bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
-            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent. Spread was: ", currentSpread, " pts.");
+            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent.");
             return res;
          }
       }
@@ -191,11 +190,9 @@ void CheckTradeEntry()
       MqlDateTime tm;
       TimeToStruct(currentTime, tm);
       
-      // If StartHour < EndHour (e.g., 07:00 to 16:00), simply check if within range
       if (StartHour < EndHour) {
          if (tm.hour < StartHour || tm.hour >= EndHour) return; 
       }
-      // If StartHour > EndHour (e.g., 22:00 to 08:00 overnight), logic flips
       else {
          if (tm.hour < StartHour && tm.hour >= EndHour) return;
       }
@@ -204,6 +201,37 @@ void CheckTradeEntry()
    if (PositionsTotal() >= MaxOpenTrades) return;
    
    if (!AllowTrading) return;
+
+   // -----------------------------------------------------------------
+   // [NEW] ADR LOGIC GATE (The Professional Split)
+   // -----------------------------------------------------------------
+   double currentADR = CalculateADR(ADR_Period);
+   
+   // MODE A: RANGE FADE (Low Volatility)
+   if (Use_ADR_Filter && Enable_SectorC_Range && currentADR < SectorC_Max_ADR) {
+       
+       // Logic: Buy Demand & Sell Supply (Ignore Trend)
+       // We still require Overlap with HTF to ensure key levels
+       
+       if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
+           ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Range-Fade", ReferenceZonePips_LTF);
+       }
+       
+       if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
+           ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Range-Fade", ReferenceZonePips_LTF);
+       }
+       
+       // IMPORTANT: Return here so we don't run trend logic
+       return; 
+   }
+
+   // MODE B: TREND FOLLOWER (Goldilocks Zone)
+   // If ADR filter is ON, we only proceed if ADR is within the "Healthy" range
+   if (Use_ADR_Filter) {
+       if (currentADR < ADR_Min_Pips || currentADR > ADR_Max_Pips) return;
+   }
+   // -----------------------------------------------------------------
+
 
    if (Enable_ZiZ_Mode) {
       if (ZiZ_AllowTrend) {
@@ -215,13 +243,8 @@ void CheckTradeEntry()
              } else {
                  // COUNTER TREND: Scalp Buy (Riskier)
                  bool allowTrade = true;
-                 
-                 // [TOXIC FILTER]: Block if M15 is UP (Chasing Pullback)
                  if (UseToxicFilter && currentMarketTrend_LTF == 1) allowTrade = false;
-                 
-                 if (allowTrade) {
-                    ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
-                 }
+                 if (allowTrade) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
              }
          }
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
@@ -232,27 +255,18 @@ void CheckTradeEntry()
              } else {
                  // COUNTER TREND: Scalp Sell (Riskier)
                  bool allowTrade = true;
-                 
-                 // [TOXIC FILTER]: Block if M15 is DOWN or Neutral (Chasing Drop)
                  if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
-                 
-                 if (allowTrade) {
-                    ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
-                 }
+                 if (allowTrade) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
              }
          }
       }
 
       if (ZiZ_AllowStairStep) {
          if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
-             // BUY STEP: Always Allowed
              ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
          }
          if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-             // SELL STEP: Gated by ZiZ_AllowStepSell Toggle
-             if (ZiZ_AllowStepSell) {
-                ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
-             }
+             if (ZiZ_AllowStepSell) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
          }
       }
       
@@ -486,7 +500,6 @@ void ExportTransactionsToCSV()
    
    if(file_handle != INVALID_HANDLE)
    {
-      // [NEW] Added "Commission", "Swap", "NetProfit" Columns
       FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "RawProfit", "Commission", "Swap", "NetProfit", "Strategy", "Comment", "H1 Trend", "M15 Trend");
       
       HistorySelect(0, TimeCurrent());
@@ -509,6 +522,7 @@ void ExportTransactionsToCSV()
             else if (StringFind(rawComment, "Scalp") >= 0) strategyType = "SCALP";
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT";
+            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; // [NEW] Label
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
@@ -541,9 +555,9 @@ void ExportTransactionsToCSV()
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_VOLUME), 2),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PRICE), 5),
                DoubleToString(rawProfit, 2),
-               DoubleToString(comm, 2),    // [NEW]
-               DoubleToString(swap, 2),    // [NEW]
-               DoubleToString(netProfit, 2), // [NEW] - Real Profit
+               DoubleToString(comm, 2),    
+               DoubleToString(swap, 2),    
+               DoubleToString(netProfit, 2), 
                strategyType, 
                rawComment, 
                h1_trend,   

@@ -82,7 +82,7 @@ input group "Entry Logic"
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
-input double BaseEntryDepth    = 0.40;  
+input double BaseEntryDepth    = 0.35;  // [UPDATED] Loosened from 0.40 to 0.35 for robustness
 input double BaseMaxDepth      = 0.75;
 input double TPZoneDepth       = 0.0;
 input double Breakout_HTF_Buffer_Pips = 50.0; // Buffer for Breakout Zone proximity
@@ -130,3 +130,8 @@ input int    StartHour     = 7;    // Start Trading (Server Time)
 input int    EndHour       = 16;   // Stop Entering New Trades (Server Time)
 
 input bool AllowTrading      = true; // Master Safety Switch
+
+//--- 12. SECTOR C: RANGE FADE (Low Volatility)
+input group "Sector C: Range Fade"
+input bool   Enable_SectorC_Range  = true;  // Enable Range Fade below threshold
+input double SectorC_Max_ADR       = 70.0;  // Below this ADR = Range Mode

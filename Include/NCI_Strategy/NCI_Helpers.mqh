@@ -32,6 +32,26 @@ datetime GetTime(ENUM_TIMEFRAMES tf, int index) {
    return 0;
 }
 
+// ==================================================================
+// [NEW] HELPER: CALCULATE ADR (Inserted here)
+// Used by NCI_Trade.mqh for the Logic Gate
+// ==================================================================
+double CalculateADR(int period) {
+   double atr[];
+   ArraySetAsSeries(atr, true);
+   int handle = iATR(_Symbol, PERIOD_D1, period);
+   
+   if(handle == INVALID_HANDLE) return 0;
+   
+   if(CopyBuffer(handle, 0, 1, 1, atr) <= 0) return 0;
+   
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if (point == 0) return 0;
+   
+   return atr[0] / point / 10.0; // Convert Points to Pips
+}
+// ==================================================================
+
 // --- CANDLE CHECKS ---
 bool IsGreen(ENUM_TIMEFRAMES tf, int index) { return GetClose(tf, index)>GetOpen(tf, index); }
 bool IsRed(ENUM_TIMEFRAMES tf, int index) { return GetClose(tf, index)<GetOpen(tf, index); }
@@ -64,51 +84,8 @@ bool IsBigCandle(ENUM_TIMEFRAMES tf, int index) {
    if(c==0)return false; return(b>(s/c)*BigCandleFactor);
 }
 
-// ==================================================================
-// [NEW] ADR FILTER (Average Daily Range)
-// Checks both FLOOR (Min) and CEILING (Max)
-// ==================================================================
-bool CheckADRFilter() {
-   if (!Use_ADR_Filter) return true; // Pass if filter is disabled
-
-   double dailyHighs[];
-   double dailyLows[];
-   
-   // We need 'ADR_Period' days of data
-   // We use PERIOD_D1
-   // Copy from index 1 (yesterday) to exclude incomplete current day
-   if(CopyHigh(_Symbol, PERIOD_D1, 1, ADR_Period, dailyHighs) < ADR_Period || 
-      CopyLow(_Symbol, PERIOD_D1, 1, ADR_Period, dailyLows) < ADR_Period) {
-       Print("Error copying Daily price data for ADR");
-       return true; // Fail safe
-   }
-   
-   double sumRange = 0;
-   for(int i=0; i<ADR_Period; i++) {
-      sumRange += (dailyHighs[i] - dailyLows[i]);
-   }
-   
-   double avgRangePoints = sumRange / ADR_Period;
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   
-   // Convert to Pips (Standard 10 points = 1 pip logic)
-   double pips = avgRangePoints / point / 10.0;
-   
-   // 1. CHECK FLOOR (Is it too quiet?)
-   if (pips < ADR_Min_Pips) {
-       // Print(">>> ADR BLOCK: Market Sleeping. Current: ", pips, " Min: ", ADR_Min_Pips);
-       return false;
-   }
-
-   // 2. CHECK CEILING (Is it too violent?)
-   if (pips > ADR_Max_Pips) {
-       // Print(">>> ADR BLOCK: Market Violent. Current: ", pips, " Max: ", ADR_Max_Pips);
-       return false;
-   }
-   
-   return true;
-}
-// ==================================================================
+// [REMOVED] CheckADRFilter() 
+// Reason: Logic moved to NCI_Trade.mqh to handle Range/Trend switching
 
 // --- UTILITY FUNCTIONS ---
 bool IsNewBar() { 
@@ -185,8 +162,7 @@ datetime FindBreakoutTime(ENUM_TIMEFRAMES tf, int startBar, int endBar, double l
                    if (c2 > c1) return GetTime(tf, i-1);
                }
            }
-       } 
-       else { 
+       } else { 
            if (c1 < level) isBreak1 = true;
            if (isBreak1) {
                if (IsMarubozu(tf, i)) {
