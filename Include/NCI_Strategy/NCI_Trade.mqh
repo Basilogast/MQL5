@@ -31,6 +31,9 @@ string GetTrendLabel(int trendVal) {
    return "Y"; 
 }
 
+// [DELETED DUPLICATE CheckVolatility HERE] 
+// It relies on the definition in NCI_Helpers.mqh
+
 // *** OPEN TRADE FUNCTION ***
 bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
@@ -479,7 +482,7 @@ void ManageTradeState() {
    } 
 }
 
-// *** UPDATED EXPORT FUNCTION (With Commission, Swap & ADR) ***
+// *** UPDATED EXPORT FUNCTION (With Commission, Swap & ADR Stats) ***
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
@@ -539,13 +542,9 @@ void ExportTransactionsToCSV()
             double historicalADR = 0;
             if (atr_handle != INVALID_HANDLE) {
                 datetime dealTime = (datetime)HistoryDealGetInteger(ticket_deal, DEAL_TIME);
-                // Find the D1 bar index for this trade time
                 int dayShift = iBarShift(_Symbol, PERIOD_D1, dealTime);
                 if (dayShift >= 0) {
                     double atrValues[];
-                    // We need the ADR value that was valid AT the time of entry.
-                    // The strategy uses index 1 (Yesterday's Close) relative to current time.
-                    // So we need index (dayShift + 1).
                     if(CopyBuffer(atr_handle, 0, dayShift + 1, 1, atrValues) > 0) {
                         historicalADR = (atrValues[0] / point) / 10.0;
                     }
@@ -567,7 +566,7 @@ void ExportTransactionsToCSV()
                DoubleToString(comm, 2),    
                DoubleToString(swap, 2),    
                DoubleToString(netProfit, 2), 
-               DoubleToString(historicalADR, 1), // [NEW] ADR Column
+               DoubleToString(historicalADR, 1), 
                strategyType, 
                rawComment, 
                h1_trend,   
@@ -575,6 +574,77 @@ void ExportTransactionsToCSV()
             );
          }
       }
+      
+      // =================================================================================
+      // [FIXED] ADR MARKET STATS REPORT (Restricted to Test Period Only)
+      // =================================================================================
+      if (MQLInfoInteger(MQL_TESTER)) {
+          FileWrite(file_handle, "");
+          FileWrite(file_handle, "--- ADR STATISTICS REPORT (Daily) ---");
+          
+          int lowCount = 0;
+          int midCount = 0;
+          int highCount = 0;
+          int totalDays = 0;
+          
+          // 1. Determine the actual Start and End time of the test
+          // In Strategy Tester, the first and last deal usually define the active period
+          datetime startTest = 0;
+          datetime endTest = 0;
+          
+          if (HistorySelect(0, TimeCurrent())) {
+              int deals = HistoryDealsTotal();
+              if (deals > 0) {
+                  startTest = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(0), DEAL_TIME);
+                  endTest   = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(deals-1), DEAL_TIME);
+              }
+          }
+          
+          // 2. Iterate through Daily Bars, but FILTER by date
+          int bars = Bars(_Symbol, PERIOD_D1);
+          if (atr_handle != INVALID_HANDLE && bars > 0) {
+              double atrBuffer[];
+              datetime timeBuffer[]; // We need the time of each bar
+              
+              // Copy ADR values
+              if (CopyBuffer(atr_handle, 0, 0, bars, atrBuffer) > 0) {
+                  // Copy Time values for the same bars
+                  if (CopyTime(_Symbol, PERIOD_D1, 0, bars, timeBuffer) > 0) {
+                      
+                      for(int i=0; i < ArraySize(atrBuffer)-1; i++) {
+                          datetime barTime = timeBuffer[i];
+                          
+                          // FILTER: Only count this day if it is within our testing window
+                          if (barTime >= startTest && barTime <= endTest) {
+                              double dailyADR = (atrBuffer[i] / point) / 10.0;
+                              
+                              if (dailyADR < Stats_ADR_Low) lowCount++;
+                              else if (dailyADR > Stats_ADR_High) highCount++;
+                              else midCount++;
+                              
+                              totalDays++;
+                          }
+                      }
+                  }
+              }
+          }
+          
+          if (totalDays > 0) {
+              FileWrite(file_handle, "Period Analyzed", TimeToString(startTest) + " to " + TimeToString(endTest));
+              FileWrite(file_handle, "Total Days", (string)totalDays);
+              FileWrite(file_handle, "Zone", "Count", "Percent");
+              
+              string pLow = DoubleToString(((double)lowCount / totalDays) * 100.0, 1) + "%";
+              FileWrite(file_handle, "Low (< " + DoubleToString(Stats_ADR_Low, 0) + ")", (string)lowCount, pLow);
+              
+              string pMid = DoubleToString(((double)midCount / totalDays) * 100.0, 1) + "%";
+              FileWrite(file_handle, "Mid (" + DoubleToString(Stats_ADR_Low, 0) + "-" + DoubleToString(Stats_ADR_High, 0) + ")", (string)midCount, pMid);
+              
+              string pHigh = DoubleToString(((double)highCount / totalDays) * 100.0, 1) + "%";
+              FileWrite(file_handle, "High (> " + DoubleToString(Stats_ADR_High, 0) + ")", (string)highCount, pHigh);
+          }
+      }
+      
       FileClose(file_handle);
    }
 }

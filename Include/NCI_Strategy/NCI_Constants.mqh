@@ -135,3 +135,8 @@ input bool AllowTrading      = true; // Master Safety Switch
 input group "Sector C: Range Fade"
 input bool   Enable_SectorC_Range  = true;  // Enable Range Fade below threshold
 input double SectorC_Max_ADR       = 70.0;  // Below this ADR = Range Mode
+
+//--- 13. SECTOR D: STATISTICS (Backtest Report)
+input group "Sector D: Statistics Report"
+input double Stats_ADR_Low         = 70.0;  // Threshold for "Low Volatility"
+input double Stats_ADR_High        = 85.0;  // Threshold for "High Volatility"
