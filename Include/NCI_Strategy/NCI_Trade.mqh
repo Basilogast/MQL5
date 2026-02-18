@@ -31,9 +31,6 @@ string GetTrendLabel(int trendVal) {
    return "Y"; 
 }
 
-// [DELETED DUPLICATE CheckVolatility HERE] 
-// It relies on the definition in NCI_Helpers.mqh
-
 // *** OPEN TRADE FUNCTION ***
 bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
@@ -210,9 +207,6 @@ void CheckTradeEntry()
    // MODE A: RANGE FADE (Low Volatility)
    if (Use_ADR_Filter && Enable_SectorC_Range && currentADR < SectorC_Max_ADR) {
        
-       // Logic: Buy Demand & Sell Supply (Ignore Trend)
-       // We still require Overlap with HTF to ensure key levels
-       
        if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
            ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Range-Fade", ReferenceZonePips_LTF);
        }
@@ -220,13 +214,10 @@ void CheckTradeEntry()
        if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
            ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Range-Fade", ReferenceZonePips_LTF);
        }
-       
-       // IMPORTANT: Return here so we don't run trend logic
        return; 
    }
 
    // MODE B: TREND FOLLOWER (Goldilocks Zone)
-   // If ADR filter is ON, we only proceed if ADR is within the "Healthy" range
    if (Use_ADR_Filter) {
        if (currentADR < ADR_Min_Pips || currentADR > ADR_Max_Pips) return;
    }
@@ -237,11 +228,9 @@ void CheckTradeEntry()
       if (ZiZ_AllowTrend) {
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
              if (currentMarketTrend_HTF == 1) {
-                 // WITH TREND: Swing Buy (Strongest)
                  bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
                  if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
              } else {
-                 // COUNTER TREND: Scalp Buy (Riskier)
                  bool allowTrade = true;
                  if (UseToxicFilter && currentMarketTrend_LTF == 1) allowTrade = false;
                  if (allowTrade) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
@@ -249,11 +238,9 @@ void CheckTradeEntry()
          }
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
              if (currentMarketTrend_HTF == -1) {
-                 // WITH TREND: Swing Sell (Strongest)
                  bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
                  if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
              } else {
-                 // COUNTER TREND: Scalp Sell (Riskier)
                  bool allowTrade = true;
                  if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
                  if (allowTrade) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
@@ -492,7 +479,7 @@ void ManageTradeState() {
    } 
 }
 
-// *** UPDATED EXPORT FUNCTION (With Commission & Swap) ***
+// *** UPDATED EXPORT FUNCTION (With Commission, Swap & ADR) ***
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
@@ -500,10 +487,15 @@ void ExportTransactionsToCSV()
    
    if(file_handle != INVALID_HANDLE)
    {
-      FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "RawProfit", "Commission", "Swap", "NetProfit", "Strategy", "Comment", "H1 Trend", "M15 Trend");
+      // [NEW] Added "ADR" Column
+      FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "RawProfit", "Commission", "Swap", "NetProfit", "ADR", "Strategy", "Comment", "H1 Trend", "M15 Trend");
       
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
+      
+      // Initialize ADR Handle for historical calculation
+      int atr_handle = iATR(_Symbol, PERIOD_D1, ADR_Period);
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
       
       for(int i = 0; i < total_deals; i++)
       {
@@ -522,7 +514,7 @@ void ExportTransactionsToCSV()
             else if (StringFind(rawComment, "Scalp") >= 0) strategyType = "SCALP";
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT";
-            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; // [NEW] Label
+            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; 
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
@@ -542,6 +534,23 @@ void ExportTransactionsToCSV()
                    }
                }
             }
+            
+            // --- HISTORICAL ADR CALCULATION ---
+            double historicalADR = 0;
+            if (atr_handle != INVALID_HANDLE) {
+                datetime dealTime = (datetime)HistoryDealGetInteger(ticket_deal, DEAL_TIME);
+                // Find the D1 bar index for this trade time
+                int dayShift = iBarShift(_Symbol, PERIOD_D1, dealTime);
+                if (dayShift >= 0) {
+                    double atrValues[];
+                    // We need the ADR value that was valid AT the time of entry.
+                    // The strategy uses index 1 (Yesterday's Close) relative to current time.
+                    // So we need index (dayShift + 1).
+                    if(CopyBuffer(atr_handle, 0, dayShift + 1, 1, atrValues) > 0) {
+                        historicalADR = (atrValues[0] / point) / 10.0;
+                    }
+                }
+            }
 
             double rawProfit = HistoryDealGetDouble(ticket_deal, DEAL_PROFIT);
             double comm = HistoryDealGetDouble(ticket_deal, DEAL_COMMISSION);
@@ -558,6 +567,7 @@ void ExportTransactionsToCSV()
                DoubleToString(comm, 2),    
                DoubleToString(swap, 2),    
                DoubleToString(netProfit, 2), 
+               DoubleToString(historicalADR, 1), // [NEW] ADR Column
                strategyType, 
                rawComment, 
                h1_trend,   
