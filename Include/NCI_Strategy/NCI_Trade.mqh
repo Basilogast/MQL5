@@ -31,9 +31,6 @@ string GetTrendLabel(int trendVal) {
    return "Y"; 
 }
 
-// [DELETED DUPLICATE CheckVolatility HERE] 
-// It relies on the definition in NCI_Helpers.mqh
-
 // *** OPEN TRADE FUNCTION ***
 bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
@@ -68,8 +65,9 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    return false;
 }
 
-// *** ENTRY LOGIC ***
-bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips)
+// *** ENTRY LOGIC (Updated with customEntryDepth and customBuffer) ***
+// I added two optional parameters at the end to support Storm Mode overrides
+bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips, double customEntryDepth = -1.0, double customBuffer = -1.0)
 {
    datetime relevantTime = entryZone.startTime;
    if (relevantTime != CurrentZoneID) {
@@ -91,8 +89,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
        if (Debug_Show_Spread) Print(">>> BLOCKED: Spread (", currentSpread, ") too high.");
        return false;
    }
-   
-   // NOTE: ADR Check removed from here - it is now handled in CheckTradeEntry()
 
    double tradeRisk = RiskPercent;
    if (EntryMode == MODE_SINGLE) 
@@ -121,18 +117,27 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    
    double scalingFactor = refPips / zoneHeightPips;
    
-   double dynamicEntryPct = BaseEntryDepth * scalingFactor;
+   // --- DEPTH CALCULATION (Normal vs Storm) ---
+   double activeEntryDepth = BaseEntryDepth;
+   if (customEntryDepth > 0) activeEntryDepth = customEntryDepth; // Override for Storm Mode
+   
+   double dynamicEntryPct = activeEntryDepth * scalingFactor;
    
    if (isBreakout) dynamicEntryPct = 0.05; 
 
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
+   
+   // Clamp percentages
    if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
-   if (dynamicEntryPct > 0.60) dynamicEntryPct = 0.60;
+   if (dynamicEntryPct > 0.85) dynamicEntryPct = 0.85; // Allow deeper entry for Storm
    if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
-   if (dynamicMaxPct > 0.80) dynamicMaxPct = 0.80;
+   if (dynamicMaxPct > 0.90) dynamicMaxPct = 0.90;
 
+   // --- BUFFER CALCULATION (Normal vs Storm) ---
    double finalBuffer = BaseBufferPoints;
-   if (UseDynamicBuffer) {
+   if (customBuffer > 0) {
+       finalBuffer = customBuffer; // Override for Storm Mode
+   } else if (UseDynamicBuffer) {
       finalBuffer = BaseBufferPoints * scalingFactor * (1.0 + dynamicEntryPct);
       if (finalBuffer < MinBufferPoints) finalBuffer = MinBufferPoints;
       if (finalBuffer > MaxBufferPoints) finalBuffer = MaxBufferPoints;
@@ -203,63 +208,78 @@ void CheckTradeEntry()
    if (!AllowTrading) return;
 
    // -----------------------------------------------------------------
-   // [NEW] ADR LOGIC GATE (The Professional Split)
+   // [NEW] ADR LOGIC GATE (The 3-Way Split)
    // -----------------------------------------------------------------
    double currentADR = CalculateADR(ADR_Period);
    
-   // MODE A: RANGE FADE (Low Volatility)
+   // MODE A: RANGE FADE (< 70)
    if (Use_ADR_Filter && Enable_SectorC_Range && currentADR < SectorC_Max_ADR) {
-       
-       if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
+       // Relaxed Rules: No Overlap Required
+       if (activeDemand_LTF.isActive) {
            ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Range-Fade", ReferenceZonePips_LTF);
        }
-       
-       if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
+       if (activeSupply_LTF.isActive) {
            ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Range-Fade", ReferenceZonePips_LTF);
        }
        return; 
    }
+   
+   // MODE C: STORM MODE (> 85)
+   bool isStormMode = (Use_ADR_Filter && Enable_SectorE_Storm && currentADR > SectorE_Min_ADR);
+   
+   double activeDepth = isStormMode ? Storm_Entry_Depth : -1.0; // Use default if -1
+   double activeBuffer = isStormMode ? (Storm_Buffer_Pips * 10) : -1.0; // Pass points (10 pips = 100 points)
 
-   // MODE B: TREND FOLLOWER (Goldilocks Zone)
-   if (Use_ADR_Filter) {
-       if (currentADR < ADR_Min_Pips || currentADR > ADR_Max_Pips) return;
-   }
    // -----------------------------------------------------------------
-
-
+   // TREND FOLLOWER LOGIC (Runs for both Normal & Storm modes)
+   // -----------------------------------------------------------------
+   
    if (Enable_ZiZ_Mode) {
       if (ZiZ_AllowTrend) {
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
              if (currentMarketTrend_HTF == 1) {
-                 bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                 if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
-             } else {
-                 bool allowTrade = true;
-                 if (UseToxicFilter && currentMarketTrend_LTF == 1) allowTrade = false;
-                 if (allowTrade) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
-             }
+                 // Pass the Storm overrides (if active)
+                 string tag = isStormMode ? "Storm-Swing" : "ZiZ-Swing";
+                 bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, tag, ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                 
+                 if (!swingSuccess) {
+                     tag = isStormMode ? "Storm-Scalp" : "ZiZ-Scalp-FB";
+                     ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, tag, ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                 }
+             } 
          }
          if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
              if (currentMarketTrend_HTF == -1) {
-                 bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                 if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
-             } else {
-                 bool allowTrade = true;
-                 if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
-                 if (allowTrade) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                 string tag = isStormMode ? "Storm-Swing" : "ZiZ-Swing";
+                 bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, tag, ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                 
+                 if (!swingSuccess) {
+                     tag = isStormMode ? "Storm-Scalp" : "ZiZ-Scalp-FB";
+                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, tag, ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                 }
              }
          }
       }
 
+      // Note: Storm Mode generally works best with Swing trades. 
+      // We can apply it to Step/Breakout too, or leave them normal. 
+      // For now, I will apply it to Step as well for consistency.
+
       if (ZiZ_AllowStairStep) {
          if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
-             ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+             string tag = isStormMode ? "Storm-Step" : "ZiZ-Step";
+             ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, tag, ReferenceZonePips_LTF, activeDepth, activeBuffer);
          }
          if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-             if (ZiZ_AllowStepSell) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+             if (ZiZ_AllowStepSell) {
+                 string tag = isStormMode ? "Storm-Step" : "ZiZ-Step";
+                 ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, tag, ReferenceZonePips_LTF, activeDepth, activeBuffer);
+             }
          }
       }
       
+      // Breakouts are dangerous in Storm mode (False Breakouts). 
+      // We keep standard logic or could block them. Leaving as standard for now.
       if (ZiZ_AllowBreakout) {
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
@@ -518,6 +538,7 @@ void ExportTransactionsToCSV()
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT";
             else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; 
+            else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE"; // [NEW] Label
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
@@ -588,7 +609,6 @@ void ExportTransactionsToCSV()
           int totalDays = 0;
           
           // 1. Determine the actual Start and End time of the test
-          // In Strategy Tester, the first and last deal usually define the active period
           datetime startTest = 0;
           datetime endTest = 0;
           
@@ -606,9 +626,7 @@ void ExportTransactionsToCSV()
               double atrBuffer[];
               datetime timeBuffer[]; // We need the time of each bar
               
-              // Copy ADR values
               if (CopyBuffer(atr_handle, 0, 0, bars, atrBuffer) > 0) {
-                  // Copy Time values for the same bars
                   if (CopyTime(_Symbol, PERIOD_D1, 0, bars, timeBuffer) > 0) {
                       
                       for(int i=0; i < ArraySize(atrBuffer)-1; i++) {

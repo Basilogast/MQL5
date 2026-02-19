@@ -140,3 +140,10 @@ input double SectorC_Max_ADR       = 70.0;  // Below this ADR = Range Mode
 input group "Sector D: Statistics Report"
 input double Stats_ADR_Low         = 70.0;  // Threshold for "Low Volatility"
 input double Stats_ADR_High        = 85.0;  // Threshold for "High Volatility"
+
+//--- 14. SECTOR E: STORM MODE (High Volatility)
+input group "Sector E: Storm Mode (>85 ADR)"
+input bool   Enable_SectorE_Storm  = true;  // Enable Deep Entries for High Volatility
+input double SectorE_Min_ADR       = 85.0;  // Above this = Storm Mode
+input double Storm_Entry_Depth     = 0.60;  // 60% Deep (Wait for crash)
+input double Storm_Buffer_Pips     = 10.0;  // Wide Stop Loss
