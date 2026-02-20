@@ -126,11 +126,16 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
 
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
    
+   // --- DYNAMIC CLAMPING (Isolating Storm Mode limits from Normal Mode) ---
+   // If customEntryDepth > 0, it means Storm Mode is calling this function.
+   double maxAllowedEntry = (customEntryDepth > 0) ? 0.85 : 0.60;
+   double maxAllowedLimit = (customEntryDepth > 0) ? 0.90 : 0.80;
+
    // Clamp percentages
    if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
-   if (dynamicEntryPct > 0.85) dynamicEntryPct = 0.85; 
+   if (dynamicEntryPct > maxAllowedEntry) dynamicEntryPct = maxAllowedEntry; 
    if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
-   if (dynamicMaxPct > 0.90) dynamicMaxPct = 0.90;
+   if (dynamicMaxPct > maxAllowedLimit) dynamicMaxPct = maxAllowedLimit;
 
    // --- BUFFER CALCULATION (Normal vs Storm) ---
    double finalBuffer = BaseBufferPoints;

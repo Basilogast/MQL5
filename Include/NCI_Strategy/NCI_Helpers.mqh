@@ -36,19 +36,28 @@ datetime GetTime(ENUM_TIMEFRAMES tf, int index) {
 // [NEW] HELPER: CALCULATE ADR (Inserted here)
 // Used by NCI_Trade.mqh for the Logic Gate
 // ==================================================================
+// ==================================================================
+// [RESTORED] HELPER: CALCULATE ADR (Manual High-Low Math)
+// ==================================================================
 double CalculateADR(int period) {
-   double atr[];
-   ArraySetAsSeries(atr, true);
-   int handle = iATR(_Symbol, PERIOD_D1, period);
+   double dailyHighs[];
+   double dailyLows[];
    
-   if(handle == INVALID_HANDLE) return 0;
+   if(CopyHigh(_Symbol, PERIOD_D1, 1, period, dailyHighs) < period || 
+      CopyLow(_Symbol, PERIOD_D1, 1, period, dailyLows) < period) {
+       return 0.0;
+   }
    
-   if(CopyBuffer(handle, 0, 1, 1, atr) <= 0) return 0;
+   double sumRange = 0;
+   for(int i=0; i<period; i++) {
+      sumRange += (dailyHighs[i] - dailyLows[i]);
+   }
    
+   double avgRangePoints = sumRange / period;
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   if (point == 0) return 0;
+   if (point == 0) return 0.0;
    
-   return atr[0] / point / 10.0; // Convert Points to Pips
+   return avgRangePoints / point / 10.0; // Convert Points to Pips
 }
 // ==================================================================
 
