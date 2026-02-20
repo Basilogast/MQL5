@@ -82,10 +82,13 @@ input group "Entry Logic"
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
-input double BaseEntryDepth    = 0.35;  // [UPDATED] Loosened from 0.40 to 0.35 for robustness
+input double BaseEntryDepth    = 0.40;  // [RESTORED] Back to 0.40 for general cases
 input double BaseMaxDepth      = 0.75;
 input double TPZoneDepth       = 0.0;
 input double Breakout_HTF_Buffer_Pips = 50.0; // Buffer for Breakout Zone proximity
+
+input double Normal_Max_Entry_Clamp = 0.60; // Max allowed depth for normal entry
+input double Normal_Max_Limit_Clamp = 0.80; // Max allowed depth for normal limit 
 
 //--- 8. BUFFER SETTINGS
 input group "Buffer Logic"
@@ -145,5 +148,7 @@ input double Stats_ADR_High        = 85.0;  // Threshold for "High Volatility"
 input group "Sector E: Storm Mode (>85 ADR)"
 input bool   Enable_SectorE_Storm  = true;  // Enable Deep Entries for High Volatility
 input double SectorE_Min_ADR       = 85.0;  // Above this = Storm Mode
-input double Storm_Entry_Depth     = 0.60;  // 60% Deep (Wait for crash)
-input double Storm_Buffer_Pips     = 10.0;  // Wide Stop Loss
+input double Storm_Entry_Depth     = 0.70;  // 60% Deep (Wait for crash)
+input double Storm_Buffer_Pips     = 15.0;  // Wide Stop Loss
+input double Storm_Max_Entry_Clamp = 0.85;  // Max allowed depth for Storm entry
+input double Storm_Max_Limit_Clamp = 0.90;  // Max allowed depth for Storm limit

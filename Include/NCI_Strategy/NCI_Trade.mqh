@@ -126,10 +126,10 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
 
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
    
-   // --- DYNAMIC CLAMPING (Isolating Storm Mode limits from Normal Mode) ---
+   // --- DYNAMIC CLAMPING (Using Constants) ---
    // If customEntryDepth > 0, it means Storm Mode is calling this function.
-   double maxAllowedEntry = (customEntryDepth > 0) ? 0.85 : 0.60;
-   double maxAllowedLimit = (customEntryDepth > 0) ? 0.90 : 0.80;
+   double maxAllowedEntry = (customEntryDepth > 0) ? Storm_Max_Entry_Clamp : Normal_Max_Entry_Clamp;
+   double maxAllowedLimit = (customEntryDepth > 0) ? Storm_Max_Limit_Clamp : Normal_Max_Limit_Clamp;
 
    // Clamp percentages
    if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
@@ -346,10 +346,10 @@ void CheckTradeEntry()
           }
           if (Simple_Trend_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
              if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
-             else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, false, "LTF", ReferenceZonePips_LTF);
+             else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "LTF", ReferenceZonePips_LTF);
           }
           if (Simple_Breakout_LTF) { 
-             if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
+             if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_HTF.endTime == 0) {
                 if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
              }
              if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
@@ -360,7 +360,7 @@ void CheckTradeEntry()
    }
 }
 
-// *** UPDATED MANAGE POSITIONS (With Cash RR & Breakout-Confirmation Trail) ***
+// *** UPDATED MANAGE POSITIONS ***
 void ManageOpenPositions() { 
    
    // 1. Get Current Time for Friday Check
@@ -533,7 +533,7 @@ void ManageTradeState() {
    } 
 }
 
-// *** UPDATED EXPORT FUNCTION (With Commission, Swap & ADR Stats) ***
+// *** UPDATED EXPORT FUNCTION ***
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
@@ -569,7 +569,7 @@ void ExportTransactionsToCSV()
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT";
             else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; 
-            else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE"; // [NEW] Label
+            else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE"; 
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
