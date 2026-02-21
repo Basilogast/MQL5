@@ -373,7 +373,7 @@ void CheckTradeEntry()
              if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_HTF.endTime == 0) {
                 if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
              }
-             if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
+             if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_HTF.endTime == 0) {
                 if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
              }
           }
@@ -572,7 +572,7 @@ void ManageTradeState() {
    } 
 }
 
-// *** UPDATED EXPORT FUNCTION ***
+// *** UPDATED EXPORT FUNCTION (Synchronous ADR Fix) ***
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
@@ -584,8 +584,6 @@ void ExportTransactionsToCSV()
       
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
-      
-      int atr_handle = iATR(_Symbol, PERIOD_D1, ADR_Period);
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
       
       for(int i = 0; i < total_deals; i++)
@@ -625,15 +623,22 @@ void ExportTransactionsToCSV()
                }
             }
             
+            // --- ROBUST HISTORICAL ADR CALCULATION (No iATR Handle) ---
             double historicalADR = 0;
-            if (atr_handle != INVALID_HANDLE) {
-                datetime dealTime = (datetime)HistoryDealGetInteger(ticket_deal, DEAL_TIME);
-                int dayShift = iBarShift(_Symbol, PERIOD_D1, dealTime);
-                if (dayShift >= 0) {
-                    double atrValues[];
-                    if(CopyBuffer(atr_handle, 0, dayShift + 1, 1, atrValues) > 0) {
-                        historicalADR = (atrValues[0] / point) / 10.0;
+            datetime dealTime = (datetime)HistoryDealGetInteger(ticket_deal, DEAL_TIME);
+            int dayShift = iBarShift(_Symbol, PERIOD_D1, dealTime);
+            
+            if (dayShift >= 0) {
+                double highBuffer[], lowBuffer[];
+                // Copy ADR_Period days, starting from the day BEFORE the trade (dayShift + 1)
+                if (CopyHigh(_Symbol, PERIOD_D1, dayShift + 1, ADR_Period, highBuffer) == ADR_Period &&
+                    CopyLow(_Symbol, PERIOD_D1, dayShift + 1, ADR_Period, lowBuffer) == ADR_Period) {
+                    
+                    double sumPips = 0;
+                    for(int j = 0; j < ADR_Period; j++) {
+                        sumPips += (highBuffer[j] - lowBuffer[j]) / point;
                     }
+                    historicalADR = (sumPips / ADR_Period) / 10.0; // Converted to Pips
                 }
             }
 
@@ -661,6 +666,9 @@ void ExportTransactionsToCSV()
          }
       }
       
+      // =================================================================================
+      // ROBUST ADR MARKET STATS REPORT (Restricted to Test Period Only)
+      // =================================================================================
       if (MQLInfoInteger(MQL_TESTER)) {
           FileWrite(file_handle, "");
           FileWrite(file_handle, "--- ADR STATISTICS REPORT (Daily) ---");
@@ -673,29 +681,37 @@ void ExportTransactionsToCSV()
           datetime startTest = 0;
           datetime endTest = 0;
           
-          if (HistorySelect(0, TimeCurrent())) {
-              int deals = HistoryDealsTotal();
-              if (deals > 0) {
-                  startTest = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(0), DEAL_TIME);
-                  endTest   = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(deals-1), DEAL_TIME);
-              }
+          if (total_deals > 0) {
+              startTest = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(0), DEAL_TIME);
+              endTest   = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(total_deals-1), DEAL_TIME);
           }
           
-          int bars = Bars(_Symbol, PERIOD_D1);
-          if (atr_handle != INVALID_HANDLE && bars > 0) {
-              double atrBuffer[];
-              datetime timeBuffer[]; 
+          if (startTest > 0 && endTest > 0) {
+              datetime timeBuffer[];
+              // Get all daily bars exactly within the test boundaries
+              int copiedDays = CopyTime(_Symbol, PERIOD_D1, startTest, endTest, timeBuffer);
               
-              if (CopyBuffer(atr_handle, 0, 0, bars, atrBuffer) > 0) {
-                  if (CopyTime(_Symbol, PERIOD_D1, 0, bars, timeBuffer) > 0) {
+              if (copiedDays > 0) {
+                  for (int i = 0; i < copiedDays; i++) {
+                      datetime barTime = timeBuffer[i];
+                      int shift = iBarShift(_Symbol, PERIOD_D1, barTime);
                       
-                      for(int i=0; i < ArraySize(atrBuffer)-1; i++) {
-                          datetime barTime = timeBuffer[i];
-                          if (barTime >= startTest && barTime <= endTest) {
-                              double dailyADR = (atrBuffer[i] / point) / 10.0;
+                      if (shift >= 0) {
+                          double hBuf[], lBuf[];
+                          // Manually calculate the ADR for this specific day
+                          if (CopyHigh(_Symbol, PERIOD_D1, shift + 1, ADR_Period, hBuf) == ADR_Period &&
+                              CopyLow(_Symbol, PERIOD_D1, shift + 1, ADR_Period, lBuf) == ADR_Period) {
+                              
+                              double sumPips = 0;
+                              for(int j = 0; j < ADR_Period; j++) {
+                                  sumPips += (hBuf[j] - lBuf[j]) / point;
+                              }
+                              double dailyADR = (sumPips / ADR_Period) / 10.0;
+                              
                               if (dailyADR < Stats_ADR_Low) lowCount++;
                               else if (dailyADR > Stats_ADR_High) highCount++;
                               else midCount++;
+                              
                               totalDays++;
                           }
                       }
@@ -705,7 +721,7 @@ void ExportTransactionsToCSV()
           
           if (totalDays > 0) {
               FileWrite(file_handle, "Period Analyzed", TimeToString(startTest) + " to " + TimeToString(endTest));
-              FileWrite(file_handle, "Total Days", (string)totalDays);
+              FileWrite(file_handle, "Total Days Analyzed", (string)totalDays);
               FileWrite(file_handle, "Zone", "Count", "Percent");
               
               string pLow = DoubleToString(((double)lowCount / totalDays) * 100.0, 1) + "%";
@@ -716,8 +732,11 @@ void ExportTransactionsToCSV()
               
               string pHigh = DoubleToString(((double)highCount / totalDays) * 100.0, 1) + "%";
               FileWrite(file_handle, "High (> " + DoubleToString(Stats_ADR_High, 0) + ")", (string)highCount, pHigh);
+          } else {
+              FileWrite(file_handle, "Error", "No daily data could be processed. Test period might be too short.");
           }
       }
+      
       FileClose(file_handle);
    }
 }
