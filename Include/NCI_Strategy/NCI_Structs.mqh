@@ -42,11 +42,21 @@ MergedZoneState activeFlippedSupply_LTF;
 MergedZoneState activeFlippedDemand_LTF; 
 int currentMarketTrend_LTF = 0;
 
-// Shared State
-ulong CurrentOpenTicket = 0;   
-datetime CurrentZoneID = 0;
-int CurrentZoneTradeCount = 0; 
-bool ZoneIsBurned = false;
+// ==========================================
+// [FIX] SPLIT BRAIN MEMORY 
+// ==========================================
+
+// --- BUY MEMORY ---
+ulong CurrentOpenBuyTicket = 0;
+datetime CurrentBuyZoneID = 0;
+int CurrentBuyZoneTradeCount = 0;
+bool BuyZoneIsBurned = false;
+
+// --- SELL MEMORY ---
+ulong CurrentOpenSellTicket = 0;
+datetime CurrentSellZoneID = 0;
+int CurrentSellZoneTradeCount = 0;
+bool SellZoneIsBurned = false;
 
 // *** DASHBOARD VISIBILITY FLAGS ***
 bool ShowHTF = true;

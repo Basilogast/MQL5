@@ -51,11 +51,19 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    string finalComment = comment + trendStamp;
    
    if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, finalComment)) {
-      CurrentOpenTicket = trade.ResultOrder();
-      CurrentZoneTradeCount++; 
+      ulong ticket = trade.ResultOrder();
+      
+      // [FIX] SPLIT BRAIN: Route Ticket and Trade Count to correct memory
+      if (type == ORDER_TYPE_BUY) {
+          CurrentOpenBuyTicket = ticket;
+          CurrentBuyZoneTradeCount++;
+      } else {
+          CurrentOpenSellTicket = ticket;
+          CurrentSellZoneTradeCount++;
+      }
       
       // EXPLICIT LOGGING TO JOURNAL TAB
-      Print(">>> TRADE OPENED | Ticket: ", CurrentOpenTicket, 
+      Print(">>> TRADE OPENED | Ticket: ", ticket, 
             " | Strategy: ", comment, 
             " | Type: ", (type==ORDER_TYPE_BUY ? "BUY" : "SELL"),
             " | Price: ", DoubleToString(price, 5));
@@ -69,13 +77,27 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
 bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips, double customEntryDepth = -1.0, double customBuffer = -1.0)
 {
    datetime relevantTime = entryZone.startTime;
-   if (relevantTime != CurrentZoneID) {
-      CurrentZoneID = relevantTime; 
-      ZoneIsBurned = false;        
-      CurrentZoneTradeCount = 0;
+   int currentTradeCount = 0;
+
+   // [FIX] SPLIT BRAIN: Only read and write to the correct notepad based on trade direction
+   if (type == 1) { // BUY
+       if (relevantTime != CurrentBuyZoneID) {
+           CurrentBuyZoneID = relevantTime; 
+           BuyZoneIsBurned = false;        
+           CurrentBuyZoneTradeCount = 0;
+       }
+       if (BuyZoneIsBurned) return false;
+       currentTradeCount = CurrentBuyZoneTradeCount;
+       
+   } else if (type == -1) { // SELL
+       if (relevantTime != CurrentSellZoneID) {
+           CurrentSellZoneID = relevantTime; 
+           SellZoneIsBurned = false;        
+           CurrentSellZoneTradeCount = 0;
+       }
+       if (SellZoneIsBurned) return false;
+       currentTradeCount = CurrentSellZoneTradeCount;
    }
-   
-   if (ZoneIsBurned) return false; 
 
    // [NEW] SPREAD DEBUG & FILTER
    long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -92,13 +114,13 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    double tradeRisk = RiskPercent;
    if (EntryMode == MODE_SINGLE) 
    {
-      if (CurrentZoneTradeCount > 0) return false;
+      if (currentTradeCount > 0) return false;
       tradeRisk = RiskPercent;
    }
    else if (EntryMode == MODE_DOUBLE) 
    {
-      if (CurrentZoneTradeCount == 0) tradeRisk = RiskPercent;
-      else if (CurrentZoneTradeCount == 1) tradeRisk = RiskPercent * 0.5;
+      if (currentTradeCount == 0) tradeRisk = RiskPercent;
+      else if (currentTradeCount == 1) tradeRisk = RiskPercent * 0.5;
       else return false;
    }
    else if (EntryMode == MODE_INFINITE) tradeRisk = RiskPercent;
@@ -127,7 +149,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
    
    // --- DYNAMIC CLAMPING (Using Constants) ---
-   // If customEntryDepth > 0, it means Storm Mode is calling this function.
    double maxAllowedEntry = (customEntryDepth > 0) ? Storm_Max_Entry_Clamp : Normal_Max_Entry_Clamp;
    double maxAllowedLimit = (customEntryDepth > 0) ? Storm_Max_Limit_Clamp : Normal_Max_Limit_Clamp;
 
@@ -230,7 +251,7 @@ void CheckTradeEntry()
                    ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Range-Fade", ReferenceZonePips_LTF);
                }
            }
-           return; // Strictly block normal Trend and Storm logic from running here
+           return; 
        }
        
        // =============================================================
@@ -267,7 +288,7 @@ void CheckTradeEntry()
                    }
                }
            }
-           return; // Strictly block normal Trend and Range logic from running here
+           return; 
        }
    }
 
@@ -407,7 +428,6 @@ void ManageOpenPositions() {
 
       // ==================================================================
       // LOGIC 2: SMART STRUCTURE TRAIL (Stair-Step)
-      // Confirmed by BREAKOUT of opposing structure
       // ==================================================================
       bool isH1Target = (StringFind(comment, "Swing") >= 0 || StringFind(comment, "HTF") >= 0 || StringFind(comment, "Step") >= 0);
       bool trailMoved = false;
@@ -440,14 +460,12 @@ void ManageOpenPositions() {
       // ==================================================================
       if (!trailMoved && EnableProfitLocking) {
          
-         // DEFINE LOCK PARAMETERS BASED ON STRATEGY TYPE
-         double activeTriggerPct = LockTriggerPercent; // Default (0.80)
-         double activeLockPct    = LockPositionPercent; // Default (0.70)
+         double activeTriggerPct = LockTriggerPercent; 
+         double activeLockPct    = LockPositionPercent; 
          
-         // If it is a Stair-Step Trade (Step), use tighter locking
          if (StringFind(comment, "Step") >= 0) {
-             activeTriggerPct = Step_LockTriggerPercent; // (0.62)
-             activeLockPct    = Step_LockPositionPercent; // (0.60)
+             activeTriggerPct = Step_LockTriggerPercent; 
+             activeLockPct    = Step_LockPositionPercent; 
          }
 
          if (type == POSITION_TYPE_BUY) { 
@@ -472,16 +490,14 @@ void ManageOpenPositions() {
       }
       
       // ==================================================================
-      // LOGIC 4: RR LOCKING (Backup - Now Step-Specific capable)
+      // LOGIC 4: RR LOCKING
       // ==================================================================
       if (!trailMoved && Enable_RR_Locking) {
          
-         // [NEW] CHECK: If toggle is ON, limit this logic to Step trades only
          if (RR_Lock_Step_Only && StringFind(comment, "Step") < 0) {
-            // Do nothing: This is NOT a step trade, so we skip RR locking
+            // Do nothing
          } 
          else {
-            // EXECUTE RR LOGIC
             double newSL_RR = 0;
             if (type == POSITION_TYPE_BUY) {
                 if (currentSL < openPrice) { 
@@ -512,9 +528,12 @@ void ManageOpenPositions() {
    } 
 }
 
+// [FIX] SPLIT BRAIN: Check Buy memory and Sell memory independently
 void ManageTradeState() { 
-   if (CurrentOpenTicket != 0 && !PositionSelectByTicket(CurrentOpenTicket)) { 
-      if (HistorySelectByPosition((long)CurrentOpenTicket)) { 
+   
+   // --- CHECK BUY TRADES ---
+   if (CurrentOpenBuyTicket != 0 && !PositionSelectByTicket(CurrentOpenBuyTicket)) { 
+      if (HistorySelectByPosition((long)CurrentOpenBuyTicket)) { 
          double totalProfit = 0;
          int deals = HistoryDealsTotal(); 
          for(int i = 0; i < deals; i++) { 
@@ -522,14 +541,34 @@ void ManageTradeState() {
             totalProfit += (HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION));
          } 
          if (totalProfit < 0) { 
-            Print(">>> Trade LOSS. Zone BURNED.");
-            ZoneIsBurned = true; 
+            Print(">>> BUY Trade LOSS. Buy Zone BURNED.");
+            BuyZoneIsBurned = true; 
          } else { 
-            Print(">>> Trade WIN. Zone remains ACTIVE.");
-            ZoneIsBurned = false; 
+            Print(">>> BUY Trade WIN. Buy Zone remains ACTIVE.");
+            BuyZoneIsBurned = false; 
          } 
       } 
-      CurrentOpenTicket = 0;
+      CurrentOpenBuyTicket = 0;
+   } 
+
+   // --- CHECK SELL TRADES ---
+   if (CurrentOpenSellTicket != 0 && !PositionSelectByTicket(CurrentOpenSellTicket)) { 
+      if (HistorySelectByPosition((long)CurrentOpenSellTicket)) { 
+         double totalProfit = 0;
+         int deals = HistoryDealsTotal(); 
+         for(int i = 0; i < deals; i++) { 
+            ulong ticket = HistoryDealGetTicket(i);
+            totalProfit += (HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION));
+         } 
+         if (totalProfit < 0) { 
+            Print(">>> SELL Trade LOSS. Sell Zone BURNED.");
+            SellZoneIsBurned = true; 
+         } else { 
+            Print(">>> SELL Trade WIN. Sell Zone remains ACTIVE.");
+            SellZoneIsBurned = false; 
+         } 
+      } 
+      CurrentOpenSellTicket = 0;
    } 
 }
 
@@ -541,13 +580,11 @@ void ExportTransactionsToCSV()
    
    if(file_handle != INVALID_HANDLE)
    {
-      // [NEW] Added "ADR" Column
       FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "RawProfit", "Commission", "Swap", "NetProfit", "ADR", "Strategy", "Comment", "H1 Trend", "M15 Trend");
       
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
       
-      // Initialize ADR Handle for historical calculation
       int atr_handle = iATR(_Symbol, PERIOD_D1, ADR_Period);
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
       
@@ -561,7 +598,6 @@ void ExportTransactionsToCSV()
             string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
             
-            // Extract Strategy Type
             string strategyType = "OTHER";
             if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
             else if (StringFind(rawComment, "Swing") >= 0) strategyType = "SWING";
@@ -574,7 +610,6 @@ void ExportTransactionsToCSV()
             string h1_trend = "N/A";
             string m15_trend = "N/A";
             
-            // Extract Trend Tags
             int startIdx = StringFind(rawComment, "[H:");
             if (startIdx >= 0) {
                string sub = StringSubstr(rawComment, startIdx + 3); 
@@ -590,7 +625,6 @@ void ExportTransactionsToCSV()
                }
             }
             
-            // --- HISTORICAL ADR CALCULATION ---
             double historicalADR = 0;
             if (atr_handle != INVALID_HANDLE) {
                 datetime dealTime = (datetime)HistoryDealGetInteger(ticket_deal, DEAL_TIME);
@@ -627,9 +661,6 @@ void ExportTransactionsToCSV()
          }
       }
       
-      // =================================================================================
-      // [FIXED] ADR MARKET STATS REPORT (Restricted to Test Period Only)
-      // =================================================================================
       if (MQLInfoInteger(MQL_TESTER)) {
           FileWrite(file_handle, "");
           FileWrite(file_handle, "--- ADR STATISTICS REPORT (Daily) ---");
@@ -639,7 +670,6 @@ void ExportTransactionsToCSV()
           int highCount = 0;
           int totalDays = 0;
           
-          // 1. Determine the actual Start and End time of the test
           datetime startTest = 0;
           datetime endTest = 0;
           
@@ -651,26 +681,21 @@ void ExportTransactionsToCSV()
               }
           }
           
-          // 2. Iterate through Daily Bars, but FILTER by date
           int bars = Bars(_Symbol, PERIOD_D1);
           if (atr_handle != INVALID_HANDLE && bars > 0) {
               double atrBuffer[];
-              datetime timeBuffer[]; // We need the time of each bar
+              datetime timeBuffer[]; 
               
               if (CopyBuffer(atr_handle, 0, 0, bars, atrBuffer) > 0) {
                   if (CopyTime(_Symbol, PERIOD_D1, 0, bars, timeBuffer) > 0) {
                       
                       for(int i=0; i < ArraySize(atrBuffer)-1; i++) {
                           datetime barTime = timeBuffer[i];
-                          
-                          // FILTER: Only count this day if it is within our testing window
                           if (barTime >= startTest && barTime <= endTest) {
                               double dailyADR = (atrBuffer[i] / point) / 10.0;
-                              
                               if (dailyADR < Stats_ADR_Low) lowCount++;
                               else if (dailyADR > Stats_ADR_High) highCount++;
                               else midCount++;
-                              
                               totalDays++;
                           }
                       }
@@ -693,7 +718,6 @@ void ExportTransactionsToCSV()
               FileWrite(file_handle, "High (> " + DoubleToString(Stats_ADR_High, 0) + ")", (string)highCount, pHigh);
           }
       }
-      
       FileClose(file_handle);
    }
 }
