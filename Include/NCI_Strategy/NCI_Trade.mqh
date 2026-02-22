@@ -6,7 +6,7 @@
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh" 
 
-datetime GlobalLastTradeTime = 0; // [NEW] Master clock to prevent traffic jams
+datetime GlobalLastTradeTime = 0; // Master clock to prevent traffic jams
 
 // --- HELPER: CHECK ZONE OVERLAP ---
 bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
@@ -33,6 +33,61 @@ string GetTrendLabel(int trendVal) {
    return "Y"; 
 }
 
+// --- NEW HELPER: PATTERN RECOGNITION BRAIN ---
+bool CheckConfirmation(int type, double zoneStart, double zoneLimit) {
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   
+   // Pull the last 2 closed candles from the Lower Timeframe (M15)
+   if(CopyRates(_Symbol, TimeFrame_LTF, 1, 2, rates) != 2) return false;
+   
+   double c1_open = rates[0].open, c1_close = rates[0].close, c1_high = rates[0].high, c1_low = rates[0].low; // The just-closed candle
+   double c2_open = rates[1].open, c2_close = rates[1].close; // The previous candle
+   
+   if (type == 1) { // BUY LOGIC
+      // 1. Did the candle touch the zone, and safely close above invalidation?
+      if (c1_low > zoneStart || c1_close < zoneLimit) return false;
+      
+      // 2. Pinbar Check (Long Lower Wick + Bullish/Neutral Close)
+      bool isPinbar = false;
+      double totalHeight = c1_high - c1_low;
+      if (totalHeight > 0) {
+          double lowerWick = MathMin(c1_open, c1_close) - c1_low;
+          if ((lowerWick / totalHeight) >= MinWickPercent && c1_close >= c1_open) isPinbar = true;
+      }
+      
+      // 3. Engulfing Check (C2 was Bearish, C1 is Bullish & Engulfs body)
+      bool isEngulfing = false;
+      if (c2_close < c2_open && c1_close > c1_open) {
+          if (c1_close >= c2_open && c1_open <= c2_close) isEngulfing = true;
+      }
+      
+      if (ConfirmationSignal == PATTERN_PINBAR && isPinbar) return true;
+      if (ConfirmationSignal == PATTERN_ENGULFING && isEngulfing) return true;
+      if (ConfirmationSignal == PATTERN_ANY && (isPinbar || isEngulfing)) return true;
+      
+   } else { // SELL LOGIC
+      if (c1_high < zoneStart || c1_close > zoneLimit) return false;
+      
+      bool isPinbar = false;
+      double totalHeight = c1_high - c1_low;
+      if (totalHeight > 0) {
+          double upperWick = c1_high - MathMax(c1_open, c1_close);
+          if ((upperWick / totalHeight) >= MinWickPercent && c1_close <= c1_open) isPinbar = true;
+      }
+      
+      bool isEngulfing = false;
+      if (c2_close > c2_open && c1_close < c1_open) {
+          if (c1_close <= c2_open && c1_open >= c2_close) isEngulfing = true;
+      }
+      
+      if (ConfirmationSignal == PATTERN_PINBAR && isPinbar) return true;
+      if (ConfirmationSignal == PATTERN_ENGULFING && isEngulfing) return true;
+      if (ConfirmationSignal == PATTERN_ANY && (isPinbar || isEngulfing)) return true;
+   }
+   return false;
+}
+
 // *** OPEN TRADE FUNCTION ***
 bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
 {
@@ -54,10 +109,8 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, finalComment)) {
       ulong ticket = trade.ResultOrder();
       
-      // [NEW] UPDATE THE MASTER TIME BUFFER CLOCK
       GlobalLastTradeTime = TimeCurrent();
       
-      // [FIX] SPLIT BRAIN: Route Ticket and Trade Count to correct memory
       if (type == ORDER_TYPE_BUY) {
           CurrentOpenBuyTicket = ticket;
           CurrentBuyZoneTradeCount++;
@@ -66,7 +119,6 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
           CurrentSellZoneTradeCount++;
       }
       
-      // EXPLICIT LOGGING TO JOURNAL TAB
       Print(">>> TRADE OPENED | Ticket: ", ticket, 
             " | Strategy: ", comment, 
             " | Type: ", (type==ORDER_TYPE_BUY ? "BUY" : "SELL"),
@@ -82,7 +134,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    datetime relevantTime = entryZone.startTime;
    int currentTradeCount = 0;
 
-   // [FIX] SPLIT BRAIN: Only read and write to the correct notepad based on trade direction
    if (type == 1) { // BUY
        if (relevantTime != CurrentBuyZoneID) {
            CurrentBuyZoneID = relevantTime;
@@ -101,7 +152,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
        currentTradeCount = CurrentSellZoneTradeCount;
    }
 
-   // [NEW] SPREAD DEBUG & FILTER
    long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if (Debug_Show_Spread) {
        Print(">>> DEBUG SPREAD: Signal Detected. Current: ", currentSpread, " pts | Max: ", MaxSpreadPoints);
@@ -132,37 +182,32 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   // STANDARD TOUCH / LIMIT ENTRY LOGIC
    double zoneHeightPrice = entryZone.top - entryZone.bottom;
    double zoneHeightPips = zoneHeightPrice / point;
    if (zoneHeightPips <= 0) zoneHeightPips = 1;
    
    double scalingFactor = refPips / zoneHeightPips;
    
-   // --- DEPTH CALCULATION (Normal vs Storm) ---
    double activeEntryDepth = BaseEntryDepth;
-   if (customEntryDepth > 0) activeEntryDepth = customEntryDepth; // Override for Storm Mode
+   if (customEntryDepth > 0) activeEntryDepth = customEntryDepth;
    
    double dynamicEntryPct = activeEntryDepth * scalingFactor;
    if (isBreakout) dynamicEntryPct = 0.05; 
 
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
    
-   // --- DYNAMIC CLAMPING (Using Constants) ---
    double maxAllowedEntry = (customEntryDepth > 0) ? Storm_Max_Entry_Clamp : Normal_Max_Entry_Clamp;
    double maxAllowedLimit = (customEntryDepth > 0) ? Storm_Max_Limit_Clamp : Normal_Max_Limit_Clamp;
    
-   // Clamp percentages
    if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
    if (dynamicEntryPct > maxAllowedEntry) dynamicEntryPct = maxAllowedEntry;
    
    if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
    if (dynamicMaxPct > maxAllowedLimit) dynamicMaxPct = maxAllowedLimit;
    
-   // --- BUFFER CALCULATION (Normal vs Storm) ---
    double finalBuffer = BaseBufferPoints;
    if (customBuffer > 0) {
-       finalBuffer = customBuffer; // Override for Storm Mode
+       finalBuffer = customBuffer;
    } else if (UseDynamicBuffer) {
       finalBuffer = BaseBufferPoints * scalingFactor * (1.0 + dynamicEntryPct);
       if (finalBuffer < MinBufferPoints) finalBuffer = MinBufferPoints;
@@ -174,17 +219,27 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceStart = entryZone.top - (zoneHeightPrice * dynamicEntryPct);
       double entryPriceLimit = entryZone.top - (zoneHeightPrice * dynamicMaxPct);   
       
-      if (ask <= entryPriceStart && ask >= entryPriceLimit) 
+      bool signalFired = false;
+      
+      // Router: Blind Touch vs Confirmation
+      if (EntryStyle == STYLE_BLIND_TOUCH) {
+          if (ask <= entryPriceStart && ask >= entryPriceLimit) signalFired = true;
+      } 
+      else if (EntryStyle == STYLE_CONFIRMATION) {
+          if (CheckConfirmation(1, entryPriceStart, entryPriceLimit)) signalFired = true;
+      }
+      
+      if (signalFired) 
       {
          double sl = slZone.bottom - (finalBuffer * point);
          double tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth); 
-         double risk = entryPriceStart - sl;
-         double reward = tp - entryPriceStart;
+         double risk = ask - sl; 
+         double reward = tp - ask;
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : ""; 
             bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
-            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent.");
+            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Buy Entry Sent.");
             return res;
          }
       }
@@ -194,17 +249,27 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceStart = entryZone.bottom + (zoneHeightPrice * dynamicEntryPct);
       double entryPriceLimit = entryZone.bottom + (zoneHeightPrice * dynamicMaxPct);   
       
-      if (bid >= entryPriceStart && bid <= entryPriceLimit) 
+      bool signalFired = false;
+      
+      // Router: Blind Touch vs Confirmation
+      if (EntryStyle == STYLE_BLIND_TOUCH) {
+          if (bid >= entryPriceStart && bid <= entryPriceLimit) signalFired = true;
+      } 
+      else if (EntryStyle == STYLE_CONFIRMATION) {
+          if (CheckConfirmation(-1, entryPriceStart, entryPriceLimit)) signalFired = true;
+      }
+      
+      if (signalFired) 
       {
          double sl = slZone.top + (finalBuffer * point);
          double tp = opposingDemand.top - ((opposingDemand.top - opposingDemand.bottom) * TPZoneDepth);
-         double risk = sl - entryPriceStart;
-         double reward = entryPriceStart - tp;
+         double risk = sl - bid; 
+         double reward = bid - tp;
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : "";
             bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
-            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Trade Sent.");
+            if (res && Debug_Show_Spread) Print(">>> SUCCESS: Sell Entry Sent.");
             return res;
          }
       }
@@ -215,7 +280,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
 // *** MAIN CHECK FUNCTION ***
 void CheckTradeEntry()
 {
-   // --- TIME FILTER CHECK ---
    if (UseTimeFilter) {
       datetime currentTime = TimeCurrent();
       MqlDateTime tm;
@@ -233,23 +297,16 @@ void CheckTradeEntry()
    
    if (!AllowTrading) return;
 
-   // [NEW] --- TRAFFIC JAM PREVENTION (TIME BUFFER) ---
    if (MinMinutesBetweenTrades > 0 && GlobalLastTradeTime > 0) {
        if (TimeCurrent() - GlobalLastTradeTime < (MinMinutesBetweenTrades * 60)) {
            return; 
        }
    }
 
-   // -----------------------------------------------------------------
-   // STRICT MODULAR REGIME SWITCHING 
-   // -----------------------------------------------------------------
    double currentADR = CalculateADR(ADR_Period);
    
    if (Use_ADR_Filter) {
 
-       // =============================================================
-       // REGIME 1: RANGE FADE (< 70 ADR)
-       // =============================================================
        if (currentADR < SectorC_Max_ADR) {
            if (Enable_SectorC_Range) {
                if (activeDemand_LTF.isActive) {
@@ -262,15 +319,11 @@ void CheckTradeEntry()
            return;
        }
        
-       // =============================================================
-       // REGIME 3: STORM MODE (> 85 ADR)
-       // =============================================================
        else if (currentADR > SectorE_Min_ADR) {
            if (Enable_SectorE_Storm) {
                double activeDepth = Storm_Entry_Depth;
                double activeBuffer = Storm_Buffer_Pips * 10.0; 
                
-               // Storm Trend Logic (Mirror of ZiZ, but strict overrides)
                if (ZiZ_AllowTrend) {
                    if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
                        if (currentMarketTrend_HTF == 1) {
@@ -300,10 +353,6 @@ void CheckTradeEntry()
        }
    }
 
-   // =============================================================
-   // REGIME 2: NORMAL TREND (70-85 ADR or ADR Filter Disabled)
-   // =============================================================
-   
    if (Enable_ZiZ_Mode) {
       if (ZiZ_AllowTrend) {
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
@@ -344,13 +393,12 @@ void CheckTradeEntry()
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
          if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
+             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
       }
       return;
    }
 
-   // [Fallback] SIMPLE MODE
    if (Enable_Simple_Mode) {
       if (Simple_Trade_HTF) { 
           if (Simple_Trend_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
@@ -379,7 +427,7 @@ void CheckTradeEntry()
           }
           if (Simple_Breakout_LTF) { 
              if (activeFlippedSupply_LTF.isActive && activeDemand_LTF.isActive && activeFlippedSupply_HTF.endTime == 0) {
-                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF);
              }
              if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_HTF.endTime == 0) {
                 if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
@@ -389,10 +437,7 @@ void CheckTradeEntry()
    }
 }
 
-// *** UPDATED MANAGE POSITIONS ***
 void ManageOpenPositions() { 
-   
-   // 1. Get Current Time for Friday Check
    datetime currentTime = TimeCurrent();
    MqlDateTime tm;
    TimeToStruct(currentTime, tm);
@@ -420,9 +465,6 @@ void ManageOpenPositions() {
       double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
       
-      // ==================================================================
-      // LOGIC 1: FRIDAY "CASH RR" CLOSE
-      // ==================================================================
       if (isFridayCloseTime) {
           double standardRiskAmount = Account_Initial_Balance * (RiskPercent / 100.0);
           double currentProfitMoney = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
@@ -434,9 +476,6 @@ void ManageOpenPositions() {
           }
       }
 
-      // ==================================================================
-      // LOGIC 2: SMART STRUCTURE TRAIL (Stair-Step)
-      // ==================================================================
       bool isH1Target = (StringFind(comment, "Swing") >= 0 || StringFind(comment, "HTF") >= 0 || StringFind(comment, "Step") >= 0);
       bool trailMoved = false;
 
@@ -463,11 +502,7 @@ void ManageOpenPositions() {
          }
       }
 
-      // ==================================================================
-      // LOGIC 3: PERCENTAGE LOCKING (Fallback)
-      // ==================================================================
       if (!trailMoved && EnableProfitLocking) {
-         
          double activeTriggerPct = LockTriggerPercent;
          double activeLockPct    = LockPositionPercent; 
          
@@ -497,14 +532,8 @@ void ManageOpenPositions() {
          }
       }
       
-      // ==================================================================
-      // LOGIC 4: RR LOCKING
-      // ==================================================================
       if (!trailMoved && Enable_RR_Locking) {
-         
-         if (RR_Lock_Step_Only && StringFind(comment, "Step") < 0) {
-            // Do nothing
-         } 
+         if (RR_Lock_Step_Only && StringFind(comment, "Step") < 0) { } 
          else {
             double newSL_RR = 0;
             if (type == POSITION_TYPE_BUY) {
@@ -536,10 +565,7 @@ void ManageOpenPositions() {
    } 
 }
 
-// [FIX] SPLIT BRAIN: Check Buy memory and Sell memory independently
 void ManageTradeState() { 
-   
-   // --- CHECK BUY TRADES ---
    if (CurrentOpenBuyTicket != 0 && !PositionSelectByTicket(CurrentOpenBuyTicket)) { 
       if (HistorySelectByPosition((long)CurrentOpenBuyTicket)) { 
          double totalProfit = 0;
@@ -559,7 +585,6 @@ void ManageTradeState() {
       CurrentOpenBuyTicket = 0;
    } 
 
-   // --- CHECK SELL TRADES ---
    if (CurrentOpenSellTicket != 0 && !PositionSelectByTicket(CurrentOpenSellTicket)) { 
       if (HistorySelectByPosition((long)CurrentOpenSellTicket)) { 
          double totalProfit = 0;
@@ -580,7 +605,6 @@ void ManageTradeState() {
    } 
 }
 
-// *** UPDATED EXPORT FUNCTION (Synchronous ADR Fix) ***
 void ExportTransactionsToCSV()
 {
    string filename = "NCI_Journal_" + _Symbol + ".csv";
@@ -630,14 +654,12 @@ void ExportTransactionsToCSV()
                }
             }
             
-            // --- ROBUST HISTORICAL ADR CALCULATION (No iATR Handle) ---
             double historicalADR = 0;
             datetime dealTime = (datetime)HistoryDealGetInteger(ticket_deal, DEAL_TIME);
             int dayShift = iBarShift(_Symbol, PERIOD_D1, dealTime);
             
             if (dayShift >= 0) {
                 double highBuffer[], lowBuffer[];
-                // Copy ADR_Period days, starting from the day BEFORE the trade (dayShift + 1)
                 if (CopyHigh(_Symbol, PERIOD_D1, dayShift + 1, ADR_Period, highBuffer) == ADR_Period &&
                     CopyLow(_Symbol, PERIOD_D1, dayShift + 1, ADR_Period, lowBuffer) == ADR_Period) {
                     
@@ -645,7 +667,7 @@ void ExportTransactionsToCSV()
                     for(int j = 0; j < ADR_Period; j++) {
                         sumPips += (highBuffer[j] - lowBuffer[j]) / point;
                     }
-                    historicalADR = (sumPips / ADR_Period) / 10.0; // Converted to Pips
+                    historicalADR = (sumPips / ADR_Period) / 10.0;
                 }
             }
 
@@ -673,9 +695,6 @@ void ExportTransactionsToCSV()
          }
       }
       
-      // =================================================================================
-      // ROBUST ADR MARKET STATS REPORT (Restricted to Test Period Only)
-      // =================================================================================
       if (MQLInfoInteger(MQL_TESTER)) {
           FileWrite(file_handle, "");
           FileWrite(file_handle, "--- ADR STATISTICS REPORT (Daily) ---");
@@ -695,7 +714,6 @@ void ExportTransactionsToCSV()
           
           if (startTest > 0 && endTest > 0) {
               datetime timeBuffer[];
-              // Get all daily bars exactly within the test boundaries
               int copiedDays = CopyTime(_Symbol, PERIOD_D1, startTest, endTest, timeBuffer);
               
               if (copiedDays > 0) {
@@ -705,7 +723,6 @@ void ExportTransactionsToCSV()
                       
                       if (shift >= 0) {
                           double hBuf[], lBuf[];
-                          // Manually calculate the ADR for this specific day
                           if (CopyHigh(_Symbol, PERIOD_D1, shift + 1, ADR_Period, hBuf) == ADR_Period &&
                               CopyLow(_Symbol, PERIOD_D1, shift + 1, ADR_Period, lBuf) == ADR_Period) {
                               
