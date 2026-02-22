@@ -82,18 +82,12 @@ input int    MaxSpreadPoints    = 25;      // Strict spread filter (2.5 pips)
 input bool   Debug_Show_Spread  = true;    // Print Spread Log for every entry attempt
 input int    MaxCandleSizePips  = 25;      // Strict candle filter (25 pips)
 
-// ADR FILTER (The Goldilocks Zone)
-input bool   Use_ADR_Filter     = true;    // Enable ADR Filter
-input int    ADR_Period         = 5;       // Days to average
-input double ADR_Min_Pips       = 70.0;    // Floor
-input double ADR_Max_Pips       = 85.0;    // Ceiling
-
 //--- 7. SCALING & ENTRY
 input group "Entry Logic"
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
-// [NEW] CONFIRMATION ENTRY SETTINGS
+// CONFIRMATION ENTRY SETTINGS
 input ENUM_ENTRY_STYLE     EntryStyle         = STYLE_CONFIRMATION;
 input ENUM_CONFIRM_PATTERN ConfirmationSignal = PATTERN_ANY;
 input double               MinWickPercent     = 0.60; // Wick must be >= 60% of candle for Pinbar
@@ -152,21 +146,27 @@ input int    EndHour       = 16;   // Stop Entering New Trades (Server Time)
 
 input bool AllowTrading      = true; // Master Safety Switch
 
-//--- 12. SECTOR C: RANGE FADE (Low Volatility)
-input group "Sector C: Range Fade"
-input bool   Enable_SectorC_Range  = true;  // Enable Range Fade below threshold
-input double SectorC_Max_ADR       = 70.0;  // Below this ADR = Range Mode
+//--- 12. ADR MARKET REGIMES (Unified Volatility Router)
+input group "ADR Market Regimes"
+input bool   Use_ADR_Filter        = true;    // [MASTER SWITCH] Enable ADR Filtering
+input int    ADR_Period            = 5;       // Days to average
 
-//--- 13. SECTOR D: STATISTICS (Backtest Report)
-input group "Sector D: Statistics Report"
-input double Stats_ADR_Low         = 70.0;  // Threshold for "Low Volatility"
-input double Stats_ADR_High        = 85.0;  // Threshold for "High Volatility"
+// Normal Trend (ZiZ) Bounds
+input double ADR_Min_Pips          = 70.0;    // Floor for Normal Trend Mode
+input double ADR_Max_Pips          = 85.0;    // Ceiling for Normal Trend Mode
 
-//--- 14. SECTOR E: STORM MODE (High Volatility)
-input group "Sector E: Storm Mode (>85 ADR)"
-input bool   Enable_SectorE_Storm  = true;  // Enable Deep Entries for High Volatility
-input double SectorE_Min_ADR       = 85.0;  // Above this = Storm Mode
-input double Storm_Entry_Depth     = 0.70;  // 60% Deep (Wait for crash)
-input double Storm_Buffer_Pips     = 15.0;  // Wide Stop Loss
-input double Storm_Max_Entry_Clamp = 0.85;  // Max allowed depth for Storm entry
-input double Storm_Max_Limit_Clamp = 0.90;  // Max allowed depth for Storm limit
+// Range Fade (Low Volatility)
+input bool   Enable_SectorC_Range  = true;    // Enable Range Fade below threshold
+input double SectorC_Max_ADR       = 70.0;    // Below this ADR = Range Mode
+
+// Storm Mode (High Volatility)
+input bool   Enable_SectorE_Storm  = true;    // Enable Deep Entries for High Volatility
+input double SectorE_Min_ADR       = 85.0;    // Above this = Storm Mode
+input double Storm_Entry_Depth     = 0.70;    // 60% Deep (Wait for crash)
+input double Storm_Buffer_Pips     = 15.0;    // Wide Stop Loss
+input double Storm_Max_Entry_Clamp = 0.85;    // Max allowed depth for Storm entry
+input double Storm_Max_Limit_Clamp = 0.90;    // Max allowed depth for Storm limit
+
+// Statistics Report Output
+input double Stats_ADR_Low         = 70.0;    // Threshold for "Low Volatility" Report
+input double Stats_ADR_High        = 85.0;    // Threshold for "High Volatility" Report
