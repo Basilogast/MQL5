@@ -53,7 +53,7 @@ input double RiskPercent          = 1.0;
 input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE;
 
 input group "Entry & Confirmation Logic"
-input bool                 Enable_Phoenix_Sweep = true; // [NEW] Recover burned zones after 1H liquidity sweep
+input bool                 Enable_Phoenix_Sweep = true; // Recover burned zones after 1H liquidity sweep
 input ENUM_ENTRY_STYLE     EntryStyle         = STYLE_CONFIRMATION;
 input ENUM_CONFIRM_PATTERN ConfirmationSignal = PATTERN_ANY;
 input double               MinWickPercent     = 0.60; // Wick must be >= 60% of candle for Pinbar
@@ -116,7 +116,7 @@ input int    EndHour       = 16;   // Stop Entering New Trades (Server Time)
 
 input group "Strategy Restrictors"
 input bool UseToxicFilter         = false; // Block counter-trend scalps
-input bool ZiZ_AllowStepSell      = false; // Block bear market step-sells
+input bool ZiZ_BlockStepSell      = true;  // [UPDATED] Block bear market step-sells
 
 input group "Structure Rules"
 input double MinBodyPercent = 0.50;  

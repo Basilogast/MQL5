@@ -7,8 +7,8 @@
 #include "NCI_Helpers.mqh" 
 
 datetime GlobalLastTradeTime = 0; // Master clock to prevent traffic jams
-datetime LastPhoenixBuyTime  = 0; // [NEW] Phoenix Logic Tracker
-datetime LastPhoenixSellTime = 0; // [NEW] Phoenix Logic Tracker
+datetime LastPhoenixBuyTime  = 0; // Phoenix Logic Tracker
+datetime LastPhoenixSellTime = 0; // Phoenix Logic Tracker
 
 // --- HELPER: CHECK ZONE OVERLAP ---
 bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
@@ -345,7 +345,8 @@ void CheckTradeEntry()
                        ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Storm-Step", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                    }
                    if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-                       if (ZiZ_AllowStepSell) {
+                       // [UPDATED] Check block toggle
+                       if (!ZiZ_BlockStepSell) {
                            ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Storm-Step", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                        }
                    }
@@ -384,7 +385,8 @@ void CheckTradeEntry()
              ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
          }
          if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-             if (ZiZ_AllowStepSell) {
+             // [UPDATED] Check block toggle
+             if (!ZiZ_BlockStepSell) {
                  ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
              }
          }
@@ -588,7 +590,7 @@ void ManageTradeState() {
       CurrentOpenBuyTicket = 0;
    } 
 
-   // [NEW] PHOENIX LOGIC FOR BUY
+   // PHOENIX LOGIC FOR BUY
    if (BuyZoneIsBurned && Enable_Phoenix_Sweep && activeDemand_HTF.isActive) {
        MqlRates rates[];
        ArraySetAsSeries(rates, true);
@@ -625,7 +627,7 @@ void ManageTradeState() {
       CurrentOpenSellTicket = 0;
    } 
    
-   // [NEW] PHOENIX LOGIC FOR SELL
+   // PHOENIX LOGIC FOR SELL
    if (SellZoneIsBurned && Enable_Phoenix_Sweep && activeSupply_HTF.isActive) {
        MqlRates rates[];
        ArraySetAsSeries(rates, true);
