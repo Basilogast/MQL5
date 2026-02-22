@@ -7,6 +7,8 @@
 #include "NCI_Helpers.mqh" 
 
 datetime GlobalLastTradeTime = 0; // Master clock to prevent traffic jams
+datetime LastPhoenixBuyTime  = 0; // [NEW] Phoenix Logic Tracker
+datetime LastPhoenixSellTime = 0; // [NEW] Phoenix Logic Tracker
 
 // --- HELPER: CHECK ZONE OVERLAP ---
 bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
@@ -566,6 +568,7 @@ void ManageOpenPositions() {
 }
 
 void ManageTradeState() { 
+   // --- CHECK BUY TRADES ---
    if (CurrentOpenBuyTicket != 0 && !PositionSelectByTicket(CurrentOpenBuyTicket)) { 
       if (HistorySelectByPosition((long)CurrentOpenBuyTicket)) { 
          double totalProfit = 0;
@@ -585,6 +588,24 @@ void ManageTradeState() {
       CurrentOpenBuyTicket = 0;
    } 
 
+   // [NEW] PHOENIX LOGIC FOR BUY
+   if (BuyZoneIsBurned && Enable_Phoenix_Sweep && activeDemand_HTF.isActive) {
+       MqlRates rates[];
+       ArraySetAsSeries(rates, true);
+       if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
+           if (rates[0].time != LastPhoenixBuyTime) {
+               double checkBottom = activeDemand_LTF.isActive ? activeDemand_LTF.bottom : activeDemand_HTF.bottom;
+               if (rates[0].close >= checkBottom) {
+                   Print(">>> PHOENIX RECOVERY (BUY): 1H Candle swept but closed safe. Un-burning Zone!");
+                   BuyZoneIsBurned = false;
+                   CurrentBuyZoneTradeCount = 0; 
+                   LastPhoenixBuyTime = rates[0].time; 
+               }
+           }
+       }
+   }
+
+   // --- CHECK SELL TRADES ---
    if (CurrentOpenSellTicket != 0 && !PositionSelectByTicket(CurrentOpenSellTicket)) { 
       if (HistorySelectByPosition((long)CurrentOpenSellTicket)) { 
          double totalProfit = 0;
@@ -603,6 +624,23 @@ void ManageTradeState() {
       } 
       CurrentOpenSellTicket = 0;
    } 
+   
+   // [NEW] PHOENIX LOGIC FOR SELL
+   if (SellZoneIsBurned && Enable_Phoenix_Sweep && activeSupply_HTF.isActive) {
+       MqlRates rates[];
+       ArraySetAsSeries(rates, true);
+       if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
+           if (rates[0].time != LastPhoenixSellTime) {
+               double checkTop = activeSupply_LTF.isActive ? activeSupply_LTF.top : activeSupply_HTF.top;
+               if (rates[0].close <= checkTop) {
+                   Print(">>> PHOENIX RECOVERY (SELL): 1H Candle swept but closed safe. Un-burning Zone!");
+                   SellZoneIsBurned = false;
+                   CurrentSellZoneTradeCount = 0; 
+                   LastPhoenixSellTime = rates[0].time; 
+               }
+           }
+       }
+   }
 }
 
 void ExportTransactionsToCSV()

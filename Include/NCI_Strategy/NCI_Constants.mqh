@@ -53,6 +53,7 @@ input double RiskPercent          = 1.0;
 input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE;
 
 input group "Entry & Confirmation Logic"
+input bool                 Enable_Phoenix_Sweep = true; // [NEW] Recover burned zones after 1H liquidity sweep
 input ENUM_ENTRY_STYLE     EntryStyle         = STYLE_CONFIRMATION;
 input ENUM_CONFIRM_PATTERN ConfirmationSignal = PATTERN_ANY;
 input double               MinWickPercent     = 0.60; // Wick must be >= 60% of candle for Pinbar
