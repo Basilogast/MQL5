@@ -6,6 +6,8 @@
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh" 
 
+datetime GlobalLastTradeTime = 0; // [NEW] Master clock to prevent traffic jams
+
 // --- HELPER: CHECK ZONE OVERLAP ---
 bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
    if (!z1.isActive || !z2.isActive) return false;
@@ -26,7 +28,7 @@ bool IsNear(MergedZoneState &z1, MergedZoneState &z2, double maxPips) {
 
 // --- HELPER: CONVERT TREND TO SHORT STRING ---
 string GetTrendLabel(int trendVal) {
-   if (trendVal == 1) return "U"; 
+   if (trendVal == 1) return "U";
    if (trendVal == -1) return "D"; 
    return "Y"; 
 }
@@ -43,7 +45,6 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    double lotSize = NormalizeDouble(riskAmount / (riskPoints * tickValue), 2);
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
@@ -52,6 +53,9 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    
    if(trade.PositionOpen(_Symbol, type, lotSize, price, sl, tp, finalComment)) {
       ulong ticket = trade.ResultOrder();
+      
+      // [NEW] UPDATE THE MASTER TIME BUFFER CLOCK
+      GlobalLastTradeTime = TimeCurrent();
       
       // [FIX] SPLIT BRAIN: Route Ticket and Trade Count to correct memory
       if (type == ORDER_TYPE_BUY) {
@@ -67,7 +71,6 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
             " | Strategy: ", comment, 
             " | Type: ", (type==ORDER_TYPE_BUY ? "BUY" : "SELL"),
             " | Price: ", DoubleToString(price, 5));
-      
       return true;
    }
    return false;
@@ -82,16 +85,15 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    // [FIX] SPLIT BRAIN: Only read and write to the correct notepad based on trade direction
    if (type == 1) { // BUY
        if (relevantTime != CurrentBuyZoneID) {
-           CurrentBuyZoneID = relevantTime; 
+           CurrentBuyZoneID = relevantTime;
            BuyZoneIsBurned = false;        
            CurrentBuyZoneTradeCount = 0;
        }
        if (BuyZoneIsBurned) return false;
        currentTradeCount = CurrentBuyZoneTradeCount;
-       
    } else if (type == -1) { // SELL
        if (relevantTime != CurrentSellZoneID) {
-           CurrentSellZoneID = relevantTime; 
+           CurrentSellZoneID = relevantTime;
            SellZoneIsBurned = false;        
            CurrentSellZoneTradeCount = 0;
        }
@@ -101,7 +103,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
 
    // [NEW] SPREAD DEBUG & FILTER
    long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   
    if (Debug_Show_Spread) {
        Print(">>> DEBUG SPREAD: Signal Detected. Current: ", currentSpread, " pts | Max: ", MaxSpreadPoints);
    }
@@ -143,7 +144,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    if (customEntryDepth > 0) activeEntryDepth = customEntryDepth; // Override for Storm Mode
    
    double dynamicEntryPct = activeEntryDepth * scalingFactor;
-   
    if (isBreakout) dynamicEntryPct = 0.05; 
 
    double dynamicMaxPct   = BaseMaxDepth * scalingFactor;
@@ -151,13 +151,14 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    // --- DYNAMIC CLAMPING (Using Constants) ---
    double maxAllowedEntry = (customEntryDepth > 0) ? Storm_Max_Entry_Clamp : Normal_Max_Entry_Clamp;
    double maxAllowedLimit = (customEntryDepth > 0) ? Storm_Max_Limit_Clamp : Normal_Max_Limit_Clamp;
-
+   
    // Clamp percentages
    if (dynamicEntryPct < 0.05) dynamicEntryPct = 0.05;
-   if (dynamicEntryPct > maxAllowedEntry) dynamicEntryPct = maxAllowedEntry; 
+   if (dynamicEntryPct > maxAllowedEntry) dynamicEntryPct = maxAllowedEntry;
+   
    if (dynamicMaxPct < 0.10) dynamicMaxPct = 0.10;
    if (dynamicMaxPct > maxAllowedLimit) dynamicMaxPct = maxAllowedLimit;
-
+   
    // --- BUFFER CALCULATION (Normal vs Storm) ---
    double finalBuffer = BaseBufferPoints;
    if (customBuffer > 0) {
@@ -221,7 +222,7 @@ void CheckTradeEntry()
       TimeToStruct(currentTime, tm);
       
       if (StartHour < EndHour) {
-         if (tm.hour < StartHour || tm.hour >= EndHour) return; 
+         if (tm.hour < StartHour || tm.hour >= EndHour) return;
       }
       else {
          if (tm.hour < StartHour && tm.hour >= EndHour) return;
@@ -231,6 +232,13 @@ void CheckTradeEntry()
    if (PositionsTotal() >= MaxOpenTrades) return;
    
    if (!AllowTrading) return;
+
+   // [NEW] --- TRAFFIC JAM PREVENTION (TIME BUFFER) ---
+   if (MinMinutesBetweenTrades > 0 && GlobalLastTradeTime > 0) {
+       if (TimeCurrent() - GlobalLastTradeTime < (MinMinutesBetweenTrades * 60)) {
+           return; 
+       }
+   }
 
    // -----------------------------------------------------------------
    // STRICT MODULAR REGIME SWITCHING 
@@ -251,7 +259,7 @@ void CheckTradeEntry()
                    ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Range-Fade", ReferenceZonePips_LTF);
                }
            }
-           return; 
+           return;
        }
        
        // =============================================================
@@ -259,7 +267,7 @@ void CheckTradeEntry()
        // =============================================================
        else if (currentADR > SectorE_Min_ADR) {
            if (Enable_SectorE_Storm) {
-               double activeDepth = Storm_Entry_Depth; 
+               double activeDepth = Storm_Entry_Depth;
                double activeBuffer = Storm_Buffer_Pips * 10.0; 
                
                // Storm Trend Logic (Mirror of ZiZ, but strict overrides)
@@ -288,7 +296,7 @@ void CheckTradeEntry()
                    }
                }
            }
-           return; 
+           return;
        }
    }
 
@@ -339,7 +347,7 @@ void CheckTradeEntry()
              ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
       }
-      return; 
+      return;
    }
 
    // [Fallback] SIMPLE MODE
@@ -402,7 +410,7 @@ void ManageOpenPositions() {
       
       double openPrice = PositionGetDouble(POSITION_PRICE_OPEN); 
       double currentSL = PositionGetDouble(POSITION_SL);
-      double currentTP = PositionGetDouble(POSITION_TP); 
+      double currentTP = PositionGetDouble(POSITION_TP);
       long type = PositionGetInteger(POSITION_TYPE); 
       string comment = PositionGetString(POSITION_COMMENT);
       
@@ -411,7 +419,7 @@ void ManageOpenPositions() {
       double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-
+      
       // ==================================================================
       // LOGIC 1: FRIDAY "CASH RR" CLOSE
       // ==================================================================
@@ -460,16 +468,16 @@ void ManageOpenPositions() {
       // ==================================================================
       if (!trailMoved && EnableProfitLocking) {
          
-         double activeTriggerPct = LockTriggerPercent; 
+         double activeTriggerPct = LockTriggerPercent;
          double activeLockPct    = LockPositionPercent; 
          
          if (StringFind(comment, "Step") >= 0) {
-             activeTriggerPct = Step_LockTriggerPercent; 
+             activeTriggerPct = Step_LockTriggerPercent;
              activeLockPct    = Step_LockPositionPercent; 
          }
 
          if (type == POSITION_TYPE_BUY) { 
-             double totalProfitDist = currentTP - openPrice; 
+             double totalProfitDist = currentTP - openPrice;
              if (totalProfitDist > 0) {
                  double triggerPrice = openPrice + (totalProfitDist * activeTriggerPct);
                  if (currentBid >= triggerPrice) { 
@@ -478,7 +486,7 @@ void ManageOpenPositions() {
                  }
              }
          } else if (type == POSITION_TYPE_SELL) { 
-             double totalProfitDist = openPrice - currentTP; 
+             double totalProfitDist = openPrice - currentTP;
              if (totalProfitDist > 0) {
                  double triggerPrice = openPrice - (totalProfitDist * activeTriggerPct);
                  if (currentAsk <= triggerPrice) { 
@@ -581,7 +589,6 @@ void ExportTransactionsToCSV()
    if(file_handle != INVALID_HANDLE)
    {
       FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "RawProfit", "Commission", "Swap", "NetProfit", "ADR", "Strategy", "Comment", "H1 Trend", "M15 Trend");
-      
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -603,22 +610,22 @@ void ExportTransactionsToCSV()
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT";
             else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; 
-            else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE"; 
+            else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE";
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
             
             int startIdx = StringFind(rawComment, "[H:");
             if (startIdx >= 0) {
-               string sub = StringSubstr(rawComment, startIdx + 3); 
+               string sub = StringSubstr(rawComment, startIdx + 3);
                int spaceIdx = StringFind(sub, " ");
                if (spaceIdx > 0) {
-                   h1_trend = StringSubstr(sub, 0, spaceIdx); 
+                   h1_trend = StringSubstr(sub, 0, spaceIdx);
                    int m15Idx = StringFind(sub, "M:");
                    if (m15Idx > 0) {
                        string sub2 = StringSubstr(sub, m15Idx + 2);
                        int closeBracket = StringFind(sub2, "]");
-                       if (closeBracket > 0) m15_trend = StringSubstr(sub2, 0, closeBracket); 
+                       if (closeBracket > 0) m15_trend = StringSubstr(sub2, 0, closeBracket);
                    }
                }
             }
@@ -646,7 +653,7 @@ void ExportTransactionsToCSV()
             double comm = HistoryDealGetDouble(ticket_deal, DEAL_COMMISSION);
             double swap = HistoryDealGetDouble(ticket_deal, DEAL_SWAP);
             double netProfit = rawProfit + comm + swap;
-
+            
             FileWrite(file_handle, 
                (string)HistoryDealGetInteger(ticket_deal, DEAL_TIME),
                (string)ticket_deal,

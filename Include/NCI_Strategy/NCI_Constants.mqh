@@ -31,7 +31,7 @@ input bool Simple_UseTrendAlign   = true;  // Filter LTF trades with HTF Trend?
 
 //--- 2. SECTOR B: ADVANCED STRATEGY (The Sniper)
 input group "Sector B: Zone-in-Zone (ZiZ)"
-input bool Enable_ZiZ_Mode        = true; // If TRUE, IGNORES Sector A
+input bool Enable_ZiZ_Mode        = true;  // If TRUE, IGNORES Sector A
 input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone (Swings)
 input bool ZiZ_AllowStairStep     = true;  // Trade LTF Zones ALIGNED with Trend (Steps)
 input bool ZiZ_AllowStepSell      = false; // [NEW] Master Switch to BLOCK Step Sells (Profit Killer)
@@ -40,9 +40,9 @@ input bool UseToxicFilter         = true;  // Block bad Counter-Trend Scalps
 
 //--- 3. SHARED RISK SETTINGS (Global)
 input group "Shared Risk Settings"
-input double RiskPercent     = 1.0;  
+input double RiskPercent     = 1.0;
 input double MinRiskReward   = 2.0;
-input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE; 
+input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE;
 
 //--- 4. VISUAL SETTINGS (Updated)
 input group "Visual Settings"
@@ -50,7 +50,6 @@ input bool Show_ZigZag_Lines = true;   // [NEW] Toggle ZigZag Lines (Turn OFF fo
 input bool Show_Zone_Boxes   = true;   // [NEW] Toggle Zone Boxes (Turn OFF for speed)
 input int  HistoryBars       = 5000;
 input int  LineWidth         = 2;
-
 color SupplyColor     = clrMaroon; 
 color DemandColor     = clrDarkGreen;
 color FlippedColor    = clrGray; 
@@ -66,23 +65,23 @@ input double BigCandleFactor = 1.3;
 
 //--- 6. VOLATILITY GUARD & FILTERS
 input group "Volatility Guard & Filters"
-input bool   UseVolatilityGuard = true; 
-input int    MaxSpreadPoints    = 25;   // [OPTIMIZED] Strict spread filter (2.5 pips)
-input bool   Debug_Show_Spread  = true; // [NEW] Print Spread Log for every entry attempt
-input int    MaxCandleSizePips  = 25;   // [OPTIMIZED] Strict candle filter (25 pips)
+input bool   UseVolatilityGuard = true;
+input int    MaxSpreadPoints    = 25;      // [OPTIMIZED] Strict spread filter (2.5 pips)
+input bool   Debug_Show_Spread  = true;    // [NEW] Print Spread Log for every entry attempt
+input int    MaxCandleSizePips  = 25;      // [OPTIMIZED] Strict candle filter (25 pips)
 
 // [NEW] ADR FILTER (The Goldilocks Zone)
-input bool   Use_ADR_Filter     = true;         // [NEW] Enable ADR Filter
-input int    ADR_Period         = 5;            // [NEW] Days to average
-input double ADR_Min_Pips       = 70.0;         // [OPTIMIZED] Floor
-input double ADR_Max_Pips       = 85.0;         // [OPTIMIZED] Ceiling
+input bool   Use_ADR_Filter     = true;    // [NEW] Enable ADR Filter
+input int    ADR_Period         = 5;       // [NEW] Days to average
+input double ADR_Min_Pips       = 70.0;    // [OPTIMIZED] Floor
+input double ADR_Max_Pips       = 85.0;    // [OPTIMIZED] Ceiling
 
 //--- 7. SCALING & ENTRY
 input group "Entry Logic"
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 
-input double BaseEntryDepth    = 0.40;  // [RESTORED] Back to 0.40 for general cases
+input double BaseEntryDepth    = 0.40;      // [RESTORED] Back to 0.40 for general cases
 input double BaseMaxDepth      = 0.75;
 input double TPZoneDepth       = 0.0;
 input double Breakout_HTF_Buffer_Pips = 50.0; // Buffer for Breakout Zone proximity
@@ -92,15 +91,17 @@ input double Normal_Max_Limit_Clamp = 0.80; // Max allowed depth for normal limi
 
 //--- 8. BUFFER SETTINGS
 input group "Buffer Logic"
-input bool   UseDynamicBuffer = false; 
+input bool   UseDynamicBuffer = false;
 input double BaseBufferPoints = 45.0;
 input double MinBufferPoints  = 20;   
 input double MaxBufferPoints  = 200;
 
 //--- 9. RISK MANAGEMENT (Basic)
 input group "Risk Management (Basic)"
-input int    MaxOpenTrades       = 2;    // Max simultaneous trades allowed
-input bool   EnableProfitLocking = true;
+input int    MaxOpenTrades           = 2;     // Max simultaneous trades allowed
+input int    MinMinutesBetweenTrades = 60;    // [NEW] Minimum minutes between opening trades
+input bool   EnableProfitLocking     = true;
+
 // Standard Trades (Swing/Scalp)
 input double LockTriggerPercent  = 0.80; // % of Distance to TP
 input double LockPositionPercent = 0.70; // % of Distance to TP
@@ -110,7 +111,7 @@ input double Step_LockPositionPercent = 0.55; // Lock stays at 60%
 
 // RR LOCKING (Backup - Now Step-Specific capable)
 input bool   Enable_RR_Locking   = true;  // [ENABLED]
-input bool   RR_Lock_Step_Only   = false;  // [NEW] If true, RR lock ONLY applies to Step trades
+input bool   RR_Lock_Step_Only   = false; // [NEW] If true, RR lock ONLY applies to Step trades
 input double RR_Lock_Trigger     = 4.0;   // [OPTIMIZED] Trigger at 1:4 RR
 input double RR_Lock_Target      = 3.5;   // [OPTIMIZED] Bank at 1:3.5 RR
 
@@ -121,10 +122,10 @@ input bool   Enable_Smart_Trail      = false; // [DISABLED]
 input double Smart_Trail_Buffer_Pips = 10.0;  
 
 // Friday End-of-Week Close (Cash RR Logic)
-input bool   Enable_Friday_Close     = true;  // Close high profit trades on Friday
-input int    Friday_Close_Hour       = 20;    // Server hour to start checking
-input double Account_Initial_Balance = 10000.0; // FTMO Initial Balance for Risk Calc
-input double Friday_Min_RR           = 3.0;     // Close if Profit > (RiskAmount * 3.0)
+input bool   Enable_Friday_Close     = true;      // Close high profit trades on Friday
+input int    Friday_Close_Hour       = 20;        // Server hour to start checking
+input double Account_Initial_Balance = 10000.0;   // FTMO Initial Balance for Risk Calc
+input double Friday_Min_RR           = 3.0;       // Close if Profit > (RiskAmount * 3.0)
 
 //--- 11. TIME FILTER
 input group "Time Filter Settings"
