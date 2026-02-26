@@ -93,21 +93,16 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
 
 // *** VISUAL UPDATE: Global Toggle + Dashboard Logic Preserved ***
 void DrawZigZagLines(string suffix, PointStruct &points[]) { 
-   // 1. GLOBAL SPEED TOGGLE (New)
    if (!Show_ZigZag_Lines) return;
-   // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
-   // 3. Clear old objects regardless of dashboard state (Good practice)
    ObjectsDeleteAll(0, "NCI_ZZ_" + suffix);
-   // 4. DASHBOARD CHECK (Preserved)
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
    int c=ArraySize(points); 
    if(c<2)return; 
    
-   int width = (suffix == "_HTF") ?
-   LineWidth + 1 : LineWidth; 
+   int width = (suffix == "_HTF") ? LineWidth + 1 : LineWidth; 
 
    for(int i=1;i<c;i++){ 
       int t=points[i].assignedTrend; 
@@ -256,7 +251,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
    for(int i=0; i<ArraySize(targetPoints); i++) CalculateZoneLimits(tf, targetPoints[i]);
    CalculateTrendsAndLock(tf, targetPoints, targetTrend); 
 
-   // --- [NEW] THE SMC ZONE VALIDATOR (BREAK OF STRUCTURE) ---
+   // --- [NEW] THE SMC ZONE VALIDATOR (BOS + SOLUTION 1 & 3) ---
    double lastValidSupplyHigh = 0;
    double lastValidDemandLow = 0;
 
@@ -269,34 +264,68 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
 
        bool isValidated = false;
 
-       if (targetPoints[i].type == -1) { // Demand (Swing Low)
+       if (targetPoints[i].type == -1) { // PENDING DEMAND
            if (lastValidSupplyHigh > 0) {
-               // Did price break the last MACRO Supply High anytime after this Demand formed?
-               isValidated = CheckForBreakout(tf, targetPoints[i].barIndex, 0, lastValidSupplyHigh, 1);
+               
+               // When did it break the Supply Ceiling?
+               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, lastValidSupplyHigh, 1);
+               // When did it fail its own floor? (Solution 3: Invalidation)
+               datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, -1);
+               
+               if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
+                   
+                   // It broke structure before getting stopped out!
+                   // Now, check for Solution 1: Is it the Immediate Sponsor?
+                   bool isOverwritten = false;
+                   for (int j = i + 1; j < ArraySize(targetPoints); j++) {
+                       if (targetPoints[j].type == -1 && targetPoints[j].time < t_break) {
+                           isOverwritten = true; // A newer demand formed before the breakout. This one is obsolete.
+                           break;
+                       }
+                   }
+                   
+                   if (!isOverwritten) isValidated = true; // Crowned!
+               }
            } else {
                isValidated = true; // First zone in history gets a free pass
            }
 
            if (isValidated) {
-               lastValidDemandLow = targetPoints[i].price; // Log this as the new Macro Low
+               lastValidDemandLow = targetPoints[i].price; 
            } else {
-               // PENDING STATE: Zero out the limits so it cannot be traded or painted
                targetPoints[i].zoneLimitTop = 0;
                targetPoints[i].zoneLimitBottom = 0;
            }
        }
-       else if (targetPoints[i].type == 1) { // Supply (Swing High)
+       else if (targetPoints[i].type == 1) { // PENDING SUPPLY
            if (lastValidDemandLow > 0) {
-               // Did price break the last MACRO Demand Low anytime after this Supply formed?
-               isValidated = CheckForBreakout(tf, targetPoints[i].barIndex, 0, lastValidDemandLow, -1);
+               
+               // When did it break the Demand Floor?
+               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, lastValidDemandLow, -1);
+               // When did it fail its own ceiling? (Solution 3: Invalidation)
+               datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, 1);
+               
+               if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
+                   
+                   // It broke structure before getting stopped out!
+                   // Now, check for Solution 1: Is it the Immediate Sponsor?
+                   bool isOverwritten = false;
+                   for (int j = i + 1; j < ArraySize(targetPoints); j++) {
+                       if (targetPoints[j].type == 1 && targetPoints[j].time < t_break) {
+                           isOverwritten = true; // A newer supply formed before the breakout. This one is obsolete.
+                           break;
+                       }
+                   }
+                   
+                   if (!isOverwritten) isValidated = true; // Crowned!
+               }
            } else {
                isValidated = true; // First zone in history gets a free pass
            }
 
            if (isValidated) {
-               lastValidSupplyHigh = targetPoints[i].price; // Log this as the new Macro High
+               lastValidSupplyHigh = targetPoints[i].price; 
            } else {
-               // PENDING STATE: Zero out the limits so it cannot be traded or painted
                targetPoints[i].zoneLimitTop = 0;
                targetPoints[i].zoneLimitBottom = 0;
            }
