@@ -251,80 +251,144 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
    for(int i=0; i<ArraySize(targetPoints); i++) CalculateZoneLimits(tf, targetPoints[i]);
    CalculateTrendsAndLock(tf, targetPoints, targetTrend); 
 
-   // --- [NEW] INTERNAL STRUCTURE VALIDATOR (IMMEDIATE SPONSOR & STOP-HUNT) ---
-   double targetSupplyToBreak = 0;
-   double targetDemandToBreak = 0;
+   // --- THE MEMORY CACHE ---
+   static datetime cacheTime_HTF[]; static int cacheStatus_HTF[];
+   static datetime cacheTime_LTF[]; static int cacheStatus_LTF[];
+
+   // --- [NEW] SWING VS INTERNAL STRUCTURE SEPARATOR ---
+   double activeMacroSupply = 0;  // The Boss Ceiling
+   double activeMacroDemand = 0;  // The Boss Floor
+   double extremeHigh = 0;        // Extreme High of internal structure
+   double extremeLow = 999999;    // Extreme Low of internal structure
 
    for (int i = 0; i < ArraySize(targetPoints); i++) {
        if (i == 0) {
-           if (targetPoints[i].type == 1) targetSupplyToBreak = targetPoints[i].price;
-           else targetDemandToBreak = targetPoints[i].price;
+           if (targetPoints[i].type == 1) {
+               activeMacroSupply = targetPoints[i].price;
+               extremeHigh = targetPoints[i].price;
+           } else {
+               activeMacroDemand = targetPoints[i].price;
+               extremeLow = targetPoints[i].price;
+           }
            continue;
        }
 
        bool isValidated = false;
+       bool isResolved = false; 
 
-       if (targetPoints[i].type == -1) { // PENDING DEMAND
-           if (targetSupplyToBreak > 0) {
-               
-               // When did it break the IMMEDIATE Supply Ceiling?
-               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetSupplyToBreak, 1);
-               // When did it fail its own floor?
-               datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, -1);
-               
-               if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
-                   
-                   // Check for Immediate Sponsor Rule:
-                   bool isOverwritten = false;
-                   for (int j = i + 1; j < ArraySize(targetPoints); j++) {
-                       if (targetPoints[j].type == -1 && targetPoints[j].time < t_break) {
-                           isOverwritten = true; // A newer demand formed before the breakout.
-                           break;
-                       }
-                   }
-                   if (!isOverwritten) isValidated = true; // Crowned!
-               }
-           } else {
-               isValidated = true; // First zone gets free pass
+       // 1. CHECK THE MEMORY CACHE
+       int cacheSize = (suffix == "_HTF") ? ArraySize(cacheTime_HTF) : ArraySize(cacheTime_LTF);
+       for(int c = 0; c < cacheSize; c++) {
+           datetime cTime = (suffix == "_HTF") ? cacheTime_HTF[c] : cacheTime_LTF[c];
+           if(cTime == targetPoints[i].time) {
+               int cStatus = (suffix == "_HTF") ? cacheStatus_HTF[c] : cacheStatus_LTF[c];
+               isResolved = true;
+               isValidated = (cStatus == 1); 
+               break;
            }
-
-           if (!isValidated) {
-               targetPoints[i].zoneLimitTop = 0;
-               targetPoints[i].zoneLimitBottom = 0;
-           }
-           // IMPORTANT: Always update the target floor, even if it's an invisible ghost!
-           targetDemandToBreak = targetPoints[i].price; 
        }
-       else if (targetPoints[i].type == 1) { // PENDING SUPPLY
-           if (targetDemandToBreak > 0) {
-               
-               // When did it break the IMMEDIATE Demand Floor?
-               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetDemandToBreak, -1);
-               // When did it fail its own ceiling?
-               datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, 1);
-               
-               if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
+
+       if (targetPoints[i].type == -1) { // PENDING DEMAND (Floor)
+           
+           // Target: If there's an active Boss Ceiling, it MUST break it. 
+           // If we are already in an Uptrend (no active Boss Ceiling), just break the internal extreme High.
+           double targetToBreak = (activeMacroSupply > 0) ? activeMacroSupply : extremeHigh;
+           
+           if (targetToBreak > 0) {
+               if (!isResolved) {
+                   datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetToBreak, 1);
+                   datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, -1);
                    
-                   // Check for Immediate Sponsor Rule:
-                   bool isOverwritten = false;
-                   for (int j = i + 1; j < ArraySize(targetPoints); j++) {
-                       if (targetPoints[j].type == 1 && targetPoints[j].time < t_break) {
-                           isOverwritten = true; // A newer supply formed before the breakout.
-                           break;
+                   if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
+                       bool isOverwritten = false;
+                       for (int j = i + 1; j < ArraySize(targetPoints); j++) {
+                           if (targetPoints[j].type == -1 && targetPoints[j].time < t_break) {
+                               isOverwritten = true; break;
+                           }
+                       }
+                       if (!isOverwritten) isValidated = true; 
+                   }
+
+                   // Lock it in Memory Cache
+                   if (t_break > 0 || t_fail > 0) {
+                       if (suffix == "_HTF") {
+                           int s = ArraySize(cacheTime_HTF);
+                           ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
+                           cacheTime_HTF[s] = targetPoints[i].time; cacheStatus_HTF[s] = isValidated ? 1 : -1;
+                       } else {
+                           int s = ArraySize(cacheTime_LTF);
+                           ArrayResize(cacheTime_LTF, s + 1); ArrayResize(cacheStatus_LTF, s + 1);
+                           cacheTime_LTF[s] = targetPoints[i].time; cacheStatus_LTF[s] = isValidated ? 1 : -1;
                        }
                    }
-                   if (!isOverwritten) isValidated = true; // Crowned!
                }
            } else {
-               isValidated = true; // First zone gets free pass
+               isValidated = true; 
            }
 
-           if (!isValidated) {
+           if (isValidated) {
+               // A new Macro Demand Floor is established!
+               activeMacroDemand = targetPoints[i].price; 
+               extremeLow = targetPoints[i].price; // Reset extreme low tracking
+               activeMacroSupply = 0;              // The downtrend is dead!
+           } else {
+               // Ghost it.
                targetPoints[i].zoneLimitTop = 0;
                targetPoints[i].zoneLimitBottom = 0;
+               // Always track the extreme absolute low of the internal chop!
+               if (targetPoints[i].price < extremeLow) extremeLow = targetPoints[i].price;
            }
-           // IMPORTANT: Always update the target ceiling, even if it's an invisible ghost!
-           targetSupplyToBreak = targetPoints[i].price;
+       }
+       else if (targetPoints[i].type == 1) { // PENDING SUPPLY (Ceiling)
+           
+           // Target: If there's an active Boss Floor, it MUST break it. 
+           // If we are already in a Downtrend (no Boss Floor), break the internal extreme Low.
+           double targetToBreak = (activeMacroDemand > 0) ? activeMacroDemand : extremeLow;
+           
+           if (targetToBreak > 0 && targetToBreak != 999999) {
+               if (!isResolved) {
+                   datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetToBreak, -1);
+                   datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, 1);
+                   
+                   if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
+                       bool isOverwritten = false;
+                       for (int j = i + 1; j < ArraySize(targetPoints); j++) {
+                           if (targetPoints[j].type == 1 && targetPoints[j].time < t_break) {
+                               isOverwritten = true; break;
+                           }
+                       }
+                       if (!isOverwritten) isValidated = true; 
+                   }
+
+                   // Lock it in Memory Cache
+                   if (t_break > 0 || t_fail > 0) {
+                       if (suffix == "_HTF") {
+                           int s = ArraySize(cacheTime_HTF);
+                           ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
+                           cacheTime_HTF[s] = targetPoints[i].time; cacheStatus_HTF[s] = isValidated ? 1 : -1;
+                       } else {
+                           int s = ArraySize(cacheTime_LTF);
+                           ArrayResize(cacheTime_LTF, s + 1); ArrayResize(cacheStatus_LTF, s + 1);
+                           cacheTime_LTF[s] = targetPoints[i].time; cacheStatus_LTF[s] = isValidated ? 1 : -1;
+                       }
+                   }
+               }
+           } else {
+               isValidated = true; 
+           }
+
+           if (isValidated) {
+               // A new Macro Supply Ceiling is established!
+               activeMacroSupply = targetPoints[i].price;
+               extremeHigh = targetPoints[i].price; // Reset extreme high tracking
+               activeMacroDemand = 0;               // The uptrend is dead!
+           } else {
+               // Ghost it.
+               targetPoints[i].zoneLimitTop = 0;
+               targetPoints[i].zoneLimitBottom = 0;
+               // Always track the extreme absolute high of the internal chop!
+               if (targetPoints[i].price > extremeHigh) extremeHigh = targetPoints[i].price;
+           }
        }
    }
 
