@@ -10,8 +10,9 @@ enum ENUM_REENTRY_MODE {
 };
 
 enum ENUM_ENTRY_STYLE {
-   STYLE_BLIND_TOUCH  = 0, // Fire instantly when price touches zone
-   STYLE_CONFIRMATION = 1  // Wait for closed candle pattern in zone
+   STYLE_BLIND_TOUCH      = 0, // Fire instantly when price touches zone
+   STYLE_CONFIRMATION     = 1, // Wait for closed candle pattern in zone
+   STYLE_STRUCTURAL_SHIFT = 2  // [NEW] Wait for 15M Trend to flip inside zone
 };
 
 enum ENUM_CONFIRM_PATTERN {
@@ -116,7 +117,7 @@ input int    EndHour       = 16;   // Stop Entering New Trades (Server Time)
 
 input group "Strategy Restrictors"
 input bool UseToxicFilter         = false; // Block counter-trend scalps
-input bool ZiZ_BlockStepSell      = true;  // [UPDATED] Block bear market step-sells
+input bool ZiZ_BlockStepSell      = true;  // Block bear market step-sells
 
 input group "Structure Rules"
 input double MinBodyPercent = 0.50;  

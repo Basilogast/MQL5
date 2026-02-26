@@ -223,12 +223,18 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       
       bool signalFired = false;
       
-      // Router: Blind Touch vs Confirmation
+      // Router: Blind Touch vs Confirmation vs Structural Shift
       if (EntryStyle == STYLE_BLIND_TOUCH) {
           if (ask <= entryPriceStart && ask >= entryPriceLimit) signalFired = true;
       } 
       else if (EntryStyle == STYLE_CONFIRMATION) {
           if (CheckConfirmation(1, entryPriceStart, entryPriceLimit)) signalFired = true;
+      }
+      else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
+          // Must be inside the HTF zone, not invalidated, and 15M trend must be strictly BULLISH (1)
+          if (ask <= entryZone.top && ask >= entryPriceLimit) {
+              if (currentMarketTrend_LTF == 1) signalFired = true;
+          }
       }
       
       if (signalFired) 
@@ -253,12 +259,18 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       
       bool signalFired = false;
       
-      // Router: Blind Touch vs Confirmation
+      // Router: Blind Touch vs Confirmation vs Structural Shift
       if (EntryStyle == STYLE_BLIND_TOUCH) {
           if (bid >= entryPriceStart && bid <= entryPriceLimit) signalFired = true;
       } 
       else if (EntryStyle == STYLE_CONFIRMATION) {
           if (CheckConfirmation(-1, entryPriceStart, entryPriceLimit)) signalFired = true;
+      }
+      else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
+          // Must be inside the HTF zone, not invalidated, and 15M trend must be strictly BEARISH (-1)
+          if (bid >= entryZone.bottom && bid <= entryPriceLimit) {
+              if (currentMarketTrend_LTF == -1) signalFired = true;
+          }
       }
       
       if (signalFired) 
