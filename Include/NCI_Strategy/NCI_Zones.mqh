@@ -8,45 +8,45 @@
 
 void StartZone(MergedZoneState &state, PointStruct &p) { 
    state.isActive=true; 
-   state.top=p.zoneLimitTop; state.bottom=p.zoneLimitBottom; state.startTime=p.time; state.lastBarIndex=p.barIndex; 
+   state.top=p.zoneLimitTop; state.bottom=p.zoneLimitBottom; state.startTime=p.time; state.lastBarIndex=p.barIndex;
 }
 
 void MergeZone(MergedZoneState &state, PointStruct &p, int type) { 
-   if (type == 1) { state.top = MathMax(state.top, p.price); state.bottom = p.zoneLimitBottom; } 
-   else { state.bottom = MathMin(state.bottom, p.price); state.top = p.zoneLimitTop; } 
-   state.startTime = p.time; state.lastBarIndex = p.barIndex; 
+   if (type == 1) { state.top = MathMax(state.top, p.price);
+   state.bottom = p.zoneLimitBottom; } 
+   else { state.bottom = MathMin(state.bottom, p.price); state.top = p.zoneLimitTop;
+   } 
+   state.startTime = p.time; state.lastBarIndex = p.barIndex;
 }
 
 // *** UPDATED: VISUAL TOGGLE & SPEED FIX (MQL5 COMPLIANT) ***
 void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double bottom, int type, int id) { 
-   if (top <= bottom) return; 
-   
+   if (top <= bottom) return;
    // 1. GLOBAL SPEED TOGGLE
    if (!Show_Zone_Boxes) return;
-
    // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
-
    // 3. DASHBOARD CHECK (Preserved)
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
-   string name = "NCI_Zone_" + suffix + IntegerToString(id) + "_" + TimeToString(t1); 
-   
+   string name = "NCI_Zone_" + suffix + IntegerToString(id) + "_" + TimeToString(t1);
    color c;
    if (suffix == "_HTF") {
-       c = (type == 1) ? clrIndianRed : clrMediumSeaGreen; 
+       c = (type == 1) ?
+       clrIndianRed : clrMediumSeaGreen; 
    } else {
-       c = (type == 1) ? SupplyColor : DemandColor; 
+       c = (type == 1) ?
+       SupplyColor : DemandColor; 
    }
 
    // MQL5 Fix: Changed OBJPROP_TIME2 to OBJPROP_TIME, 1
    if(ObjectFind(0,name)<0) { 
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, (t2==0)?TimeCurrent():t2, bottom); 
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, (t2==0)?TimeCurrent():t2, bottom);
       ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
       ObjectSetInteger(0, name, OBJPROP_FILL, true); 
       ObjectSetInteger(0, name, OBJPROP_BACK, true); 
-      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1); 
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
    } else {
       // Update End Time if object exists
       ObjectSetInteger(0, name, OBJPROP_TIME, 1, (t2==0)?TimeCurrent():t2);
@@ -57,10 +57,8 @@ void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double 
 void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
    // 1. GLOBAL SPEED TOGGLE
    if (!Show_Zone_Boxes) return;
-
    // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
-
    // 3. DASHBOARD CHECK (Preserved)
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
@@ -88,14 +86,14 @@ double FindFutureTarget(PointStruct &points[], int currentIndex, int targetType,
    {
       if (points[k].type == targetType) {
          if (targetType == 1) { 
-            if (points[k].zoneLimitBottom > referencePrice) return points[k].zoneLimitTop; 
+            if (points[k].zoneLimitBottom > referencePrice) return points[k].zoneLimitTop;
          }
          if (targetType == -1) { 
-            if (points[k].zoneLimitTop < referencePrice) return points[k].zoneLimitBottom; 
+            if (points[k].zoneLimitTop < referencePrice) return points[k].zoneLimitBottom;
          }
       }
    }
-   return 0; 
+   return 0;
 }
 
 datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double targetLevel, double selfBreakLevel)
@@ -103,11 +101,15 @@ datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double target
    for(int i = startBar - 1; i > 0; i--) 
    {
       if (targetLevel != 0) {
-          if (type == 1) { if (CheckForBreakout(tf, i+1, i, targetLevel, 1)) return GetTime(tf, i); } 
-          else { if (CheckForBreakout(tf, i+1, i, targetLevel, -1)) return GetTime(tf, i); }
+          if (type == 1) { if (CheckForBreakout(tf, i+1, i, targetLevel, 1)) return GetTime(tf, i);
+          } 
+          else { if (CheckForBreakout(tf, i+1, i, targetLevel, -1)) return GetTime(tf, i);
+          }
       }
-      if (type == 1) { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, -1)) return GetTime(tf, i); } 
-      else { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, 1)) return GetTime(tf, i); }
+      if (type == 1) { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, -1)) return GetTime(tf, i);
+      } 
+      else { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, 1)) return GetTime(tf, i);
+      }
    }
    return 0; 
 }
@@ -123,118 +125,120 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    activeFlipSup.isActive = false; 
    activeFlipDem.isActive = false; 
    
-   int count = ArraySize(points); 
+   int count = ArraySize(points);
    if (count == 0) return; 
    
    MergedZoneState supply; supply.isActive = false; 
-   MergedZoneState demand; demand.isActive = false; 
-   
+   MergedZoneState demand; demand.isActive = false;
    for (int i = 0; i < count; i++) { 
-      PointStruct p = points[i]; 
-      
+      PointStruct p = points[i];
+
+      // --- [NEW] THE ZONE VALIDATOR GHOST FILTER ---
+      // If the ZigZag Validator set the limits to 0, this is a ghost zone (No Break of Structure).
+      // Skip it completely so it doesn't overwrite our real institutional zones!
+      if (p.zoneLimitTop == 0 && p.zoneLimitBottom == 0) continue;
+
       if (p.type == 1) { // SUPPLY
-         if (!supply.isActive) StartZone(supply, p); 
+         if (!supply.isActive) StartZone(supply, p);
          else { 
             datetime preciseBreakTime = FindBreakoutTime(tf, supply.lastBarIndex, p.barIndex, supply.top, 1);
             if (preciseBreakTime > 0) { 
-               DrawSingleZone(suffix, supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1); 
-               
+               DrawSingleZone(suffix, supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1);
                if (p.assignedTrend != 1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
                        DrawFlippedZone(suffix, activeFlipDem, end); 
-                       activeFlipDem.isActive = false; 
+                       activeFlipDem.isActive = false;
                    }
                    if (activeFlipSup.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipSup.endTime > 0 && activeFlipSup.endTime < preciseBreakTime) end = activeFlipSup.endTime;
                        DrawFlippedZone(suffix, activeFlipSup, end); 
-                       activeFlipSup.isActive = false; 
+                       activeFlipSup.isActive = false;
                    }
 
                    MergedZoneState flip = supply;
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
-                   double futureTarget = FindFutureTarget(points, i, 1, supply.top); 
+                   double futureTarget = FindFutureTarget(points, i, 1, supply.top);
                    datetime deathTime = CheckZoneLife(tf, p.barIndex, 1, futureTarget, supply.bottom);
                    
                    activeFlipDem = flip;
                    if (deathTime == 0) {
-                      activeFlipDem.endTime = 0; 
+                      activeFlipDem.endTime = 0;
                       DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
                    } else {
                       activeFlipDem.endTime = deathTime;
                       DrawFlippedZone(suffix, flip, deathTime); 
                    }
                }
-               StartZone(supply, p); 
+               StartZone(supply, p);
             } else { 
-               bool shouldMerge = false; 
+               bool shouldMerge = false;
                if (p.zoneLimitTop > supply.top) shouldMerge = true; 
                else { 
-                  bool isOverlapping = (MathMax(supply.bottom, p.zoneLimitBottom) <= MathMin(supply.top, p.zoneLimitTop)); 
+                  bool isOverlapping = (MathMax(supply.bottom, p.zoneLimitBottom) <= MathMin(supply.top, p.zoneLimitTop));
                   if (isOverlapping) shouldMerge = true; 
                } 
                if (shouldMerge) { 
-                  DrawSingleZone(suffix, supply.startTime, p.time, supply.top, supply.bottom, 1, i-1); 
+                  DrawSingleZone(suffix, supply.startTime, p.time, supply.top, supply.bottom, 1, i-1);
                   MergeZone(supply, p, 1); 
                } else { 
-                  DrawSingleZone(suffix, supply.startTime, p.time, supply.top, supply.bottom, 1, i-1); 
+                  DrawSingleZone(suffix, supply.startTime, p.time, supply.top, supply.bottom, 1, i-1);
                   StartZone(supply, p); 
                } 
             } 
          } 
       } 
       else if (p.type == -1) { // DEMAND
-         if (!demand.isActive) StartZone(demand, p); 
+         if (!demand.isActive) StartZone(demand, p);
          else { 
             datetime preciseBreakTime = FindBreakoutTime(tf, demand.lastBarIndex, p.barIndex, demand.bottom, -1);
             if (preciseBreakTime > 0) { 
-               DrawSingleZone(suffix, demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1); 
-               
+               DrawSingleZone(suffix, demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1);
                if (p.assignedTrend != -1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
                        DrawFlippedZone(suffix, activeFlipDem, end); 
-                       activeFlipDem.isActive = false; 
+                       activeFlipDem.isActive = false;
                    }
                    if (activeFlipSup.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipSup.endTime > 0 && activeFlipSup.endTime < preciseBreakTime) end = activeFlipSup.endTime;
                        DrawFlippedZone(suffix, activeFlipSup, end); 
-                       activeFlipSup.isActive = false; 
+                       activeFlipSup.isActive = false;
                    }
 
                    MergedZoneState flip = demand;
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
-                   double futureTarget = FindFutureTarget(points, i, -1, demand.bottom); 
+                   double futureTarget = FindFutureTarget(points, i, -1, demand.bottom);
                    datetime deathTime = CheckZoneLife(tf, p.barIndex, -1, futureTarget, demand.top);
                    
                    activeFlipSup = flip;
                    if (deathTime == 0) {
-                      activeFlipSup.endTime = 0; 
+                      activeFlipSup.endTime = 0;
                       DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
                    } else {
                       activeFlipSup.endTime = deathTime;
                       DrawFlippedZone(suffix, flip, deathTime); 
                    }
                }
-               StartZone(demand, p); 
+               StartZone(demand, p);
             } else { 
-               bool shouldMerge = false; 
+               bool shouldMerge = false;
                if (p.zoneLimitBottom < demand.bottom) shouldMerge = true; 
                else { 
-                  bool isOverlapping = (MathMax(demand.bottom, p.zoneLimitBottom) <= MathMin(demand.top, p.zoneLimitTop)); 
+                  bool isOverlapping = (MathMax(demand.bottom, p.zoneLimitBottom) <= MathMin(demand.top, p.zoneLimitTop));
                   if (isOverlapping) shouldMerge = true; 
                } 
                if (shouldMerge) { 
-                  DrawSingleZone(suffix, demand.startTime, p.time, demand.top, demand.bottom, -1, i-1); 
+                  DrawSingleZone(suffix, demand.startTime, p.time, demand.top, demand.bottom, -1, i-1);
                   MergeZone(demand, p, -1); 
                } else { 
-                  DrawSingleZone(suffix, demand.startTime, p.time, demand.top, demand.bottom, -1, i-1); 
+                  DrawSingleZone(suffix, demand.startTime, p.time, demand.top, demand.bottom, -1, i-1);
                   StartZone(demand, p); 
                } 
             } 
@@ -260,12 +264,11 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
       }
    }
    
-   if (supply.isActive) DrawSingleZone(suffix, supply.startTime, TimeCurrent()+PeriodSeconds(tf)*50, supply.top, supply.bottom, 1, 999991); 
+   if (supply.isActive) DrawSingleZone(suffix, supply.startTime, TimeCurrent()+PeriodSeconds(tf)*50, supply.top, supply.bottom, 1, 999991);
    if (demand.isActive) DrawSingleZone(suffix, demand.startTime, TimeCurrent()+PeriodSeconds(tf)*50, demand.top, demand.bottom, -1, 999992); 
    
    activeSup = supply; 
-   activeDem = demand; 
-   
+   activeDem = demand;
    // FIX: Changed 'DrawZones' to 'Show_Zone_Boxes'
    if(!MQLInfoInteger(MQL_OPTIMIZATION) && Show_Zone_Boxes) ChartRedraw(); 
 }

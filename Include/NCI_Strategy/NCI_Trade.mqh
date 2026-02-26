@@ -133,6 +133,11 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
 // *** ENTRY LOGIC ***
 bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips, double customEntryDepth = -1.0, double customBuffer = -1.0)
 {
+   // --- [NEW] THE ZONE VALIDATOR SAFETY GUARD ---
+   // If the zone limits are 0, it is a Pending zone that hasn't caused a Break of Structure yet. Ignore it.
+   if (entryZone.top <= 0 || entryZone.bottom <= 0 || entryZone.top <= entryZone.bottom) return false;
+   if (slZone.top <= 0 || slZone.bottom <= 0) return false;
+
    datetime relevantTime = entryZone.startTime;
    int currentTradeCount = 0;
 
@@ -357,7 +362,6 @@ void CheckTradeEntry()
                        ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Storm-Step", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                    }
                    if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-                       // [UPDATED] Check block toggle
                        if (!ZiZ_BlockStepSell) {
                            ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Storm-Step", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                        }
@@ -397,7 +401,6 @@ void CheckTradeEntry()
              ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
          }
          if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-             // [UPDATED] Check block toggle
              if (!ZiZ_BlockStepSell) {
                  ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
              }
@@ -446,7 +449,7 @@ void CheckTradeEntry()
                 if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF);
              }
              if (activeFlippedDemand_LTF.isActive && activeSupply_LTF.isActive && activeFlippedDemand_HTF.endTime == 0) {
-                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "LTF", ReferenceZonePips_LTF);
              }
           }
       }
