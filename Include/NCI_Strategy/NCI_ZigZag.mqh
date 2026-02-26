@@ -91,7 +91,7 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
    } 
 }
 
-// *** VISUAL UPDATE: Global Toggle + Dashboard Logic Preserved ***
+// [Keep DrawZigZagLines ... unchanged]
 void DrawZigZagLines(string suffix, PointStruct &points[]) { 
    if (!Show_ZigZag_Lines) return;
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
@@ -251,84 +251,80 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
    for(int i=0; i<ArraySize(targetPoints); i++) CalculateZoneLimits(tf, targetPoints[i]);
    CalculateTrendsAndLock(tf, targetPoints, targetTrend); 
 
-   // --- [NEW] THE SMC ZONE VALIDATOR (BOS + SOLUTION 1 & 3) ---
-   double lastValidSupplyHigh = 0;
-   double lastValidDemandLow = 0;
+   // --- [NEW] INTERNAL STRUCTURE VALIDATOR (IMMEDIATE SPONSOR & STOP-HUNT) ---
+   double targetSupplyToBreak = 0;
+   double targetDemandToBreak = 0;
 
    for (int i = 0; i < ArraySize(targetPoints); i++) {
        if (i == 0) {
-           if (targetPoints[i].type == 1) lastValidSupplyHigh = targetPoints[i].price;
-           else lastValidDemandLow = targetPoints[i].price;
+           if (targetPoints[i].type == 1) targetSupplyToBreak = targetPoints[i].price;
+           else targetDemandToBreak = targetPoints[i].price;
            continue;
        }
 
        bool isValidated = false;
 
        if (targetPoints[i].type == -1) { // PENDING DEMAND
-           if (lastValidSupplyHigh > 0) {
+           if (targetSupplyToBreak > 0) {
                
-               // When did it break the Supply Ceiling?
-               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, lastValidSupplyHigh, 1);
-               // When did it fail its own floor? (Solution 3: Invalidation)
+               // When did it break the IMMEDIATE Supply Ceiling?
+               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetSupplyToBreak, 1);
+               // When did it fail its own floor?
                datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, -1);
                
                if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
                    
-                   // It broke structure before getting stopped out!
-                   // Now, check for Solution 1: Is it the Immediate Sponsor?
+                   // Check for Immediate Sponsor Rule:
                    bool isOverwritten = false;
                    for (int j = i + 1; j < ArraySize(targetPoints); j++) {
                        if (targetPoints[j].type == -1 && targetPoints[j].time < t_break) {
-                           isOverwritten = true; // A newer demand formed before the breakout. This one is obsolete.
+                           isOverwritten = true; // A newer demand formed before the breakout.
                            break;
                        }
                    }
-                   
                    if (!isOverwritten) isValidated = true; // Crowned!
                }
            } else {
-               isValidated = true; // First zone in history gets a free pass
+               isValidated = true; // First zone gets free pass
            }
 
-           if (isValidated) {
-               lastValidDemandLow = targetPoints[i].price; 
-           } else {
+           if (!isValidated) {
                targetPoints[i].zoneLimitTop = 0;
                targetPoints[i].zoneLimitBottom = 0;
            }
+           // IMPORTANT: Always update the target floor, even if it's an invisible ghost!
+           targetDemandToBreak = targetPoints[i].price; 
        }
        else if (targetPoints[i].type == 1) { // PENDING SUPPLY
-           if (lastValidDemandLow > 0) {
+           if (targetDemandToBreak > 0) {
                
-               // When did it break the Demand Floor?
-               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, lastValidDemandLow, -1);
-               // When did it fail its own ceiling? (Solution 3: Invalidation)
+               // When did it break the IMMEDIATE Demand Floor?
+               datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetDemandToBreak, -1);
+               // When did it fail its own ceiling?
                datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, 1);
                
                if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
                    
-                   // It broke structure before getting stopped out!
-                   // Now, check for Solution 1: Is it the Immediate Sponsor?
+                   // Check for Immediate Sponsor Rule:
                    bool isOverwritten = false;
                    for (int j = i + 1; j < ArraySize(targetPoints); j++) {
                        if (targetPoints[j].type == 1 && targetPoints[j].time < t_break) {
-                           isOverwritten = true; // A newer supply formed before the breakout. This one is obsolete.
+                           isOverwritten = true; // A newer supply formed before the breakout.
                            break;
                        }
                    }
-                   
                    if (!isOverwritten) isValidated = true; // Crowned!
                }
            } else {
-               isValidated = true; // First zone in history gets a free pass
+               isValidated = true; // First zone gets free pass
            }
 
-           if (isValidated) {
-               lastValidSupplyHigh = targetPoints[i].price; 
-           } else {
+           if (!isValidated) {
                targetPoints[i].zoneLimitTop = 0;
                targetPoints[i].zoneLimitBottom = 0;
            }
+           // IMPORTANT: Always update the target ceiling, even if it's an invisible ghost!
+           targetSupplyToBreak = targetPoints[i].price;
        }
    }
 
