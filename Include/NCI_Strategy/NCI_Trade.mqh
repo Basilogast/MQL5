@@ -42,7 +42,6 @@ bool CheckConfirmation(int type, double zoneStart, double zoneLimit) {
    
    // Pull the last 2 closed candles from the Lower Timeframe (M15)
    if(CopyRates(_Symbol, TimeFrame_LTF, 1, 2, rates) != 2) return false;
-   
    double c1_open = rates[0].open, c1_close = rates[0].close, c1_high = rates[0].high, c1_low = rates[0].low; // The just-closed candle
    double c2_open = rates[1].open, c2_close = rates[1].close; // The previous candle
    
@@ -67,7 +66,6 @@ bool CheckConfirmation(int type, double zoneStart, double zoneLimit) {
       if (ConfirmationSignal == PATTERN_PINBAR && isPinbar) return true;
       if (ConfirmationSignal == PATTERN_ENGULFING && isEngulfing) return true;
       if (ConfirmationSignal == PATTERN_ANY && (isPinbar || isEngulfing)) return true;
-      
    } else { // SELL LOGIC
       if (c1_high < zoneStart || c1_close > zoneLimit) return false;
       
@@ -99,9 +97,11 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    
    if (riskPoints <= 0 || tickValue == 0) return false;
+   
    double lotSize = NormalizeDouble(riskAmount / (riskPoints * tickValue), 2);
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
@@ -112,7 +112,6 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
       ulong ticket = trade.ResultOrder();
       
       GlobalLastTradeTime = TimeCurrent();
-      
       if (type == ORDER_TYPE_BUY) {
           CurrentOpenBuyTicket = ticket;
           CurrentBuyZoneTradeCount++;
@@ -133,14 +132,12 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
 // *** ENTRY LOGIC ***
 bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, MergedZoneState &opposingSupply, MergedZoneState &opposingDemand, int type, bool isBreakout, string commentTag, double refPips, double customEntryDepth = -1.0, double customBuffer = -1.0)
 {
-   // --- [NEW] THE ZONE VALIDATOR SAFETY GUARD ---
-   // If the zone limits are 0, it is a Pending zone that hasn't caused a Break of Structure yet. Ignore it.
+   // --- THE ZONE VALIDATOR SAFETY GUARD ---
    if (entryZone.top <= 0 || entryZone.bottom <= 0 || entryZone.top <= entryZone.bottom) return false;
    if (slZone.top <= 0 || slZone.bottom <= 0) return false;
 
    datetime relevantTime = entryZone.startTime;
    int currentTradeCount = 0;
-
    if (type == 1) { // BUY
        if (relevantTime != CurrentBuyZoneID) {
            CurrentBuyZoneID = relevantTime;
@@ -164,10 +161,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
        Print(">>> DEBUG SPREAD: Signal Detected. Current: ", currentSpread, " pts | Max: ", MaxSpreadPoints);
    }
 
-   if (currentSpread > MaxSpreadPoints) {
-       if (Debug_Show_Spread) Print(">>> BLOCKED: Spread (", currentSpread, ") too high.");
-       return false;
-   }
+   if (currentSpread > MaxSpreadPoints) return false;
 
    double tradeRisk = RiskPercent;
    if (EntryMode == MODE_SINGLE) 
@@ -227,8 +221,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceLimit = entryZone.top - (zoneHeightPrice * dynamicMaxPct);   
       
       bool signalFired = false;
-      
-      // Router: Blind Touch vs Confirmation vs Structural Shift
       if (EntryStyle == STYLE_BLIND_TOUCH) {
           if (ask <= entryPriceStart && ask >= entryPriceLimit) signalFired = true;
       } 
@@ -236,7 +228,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
           if (CheckConfirmation(1, entryPriceStart, entryPriceLimit)) signalFired = true;
       }
       else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
-          // Must be inside the HTF zone, not invalidated, and 15M trend must be strictly BULLISH (1)
           if (ask <= entryZone.top && ask >= entryPriceLimit) {
               if (currentMarketTrend_LTF == 1) signalFired = true;
           }
@@ -245,9 +236,23 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       if (signalFired) 
       {
          double sl = slZone.bottom - (finalBuffer * point);
-         double tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth); 
-         double risk = ask - sl; 
-         double reward = tp - ask;
+         double risk = ask - sl;
+         double tp = 0;
+         
+         // --- [NEW] TP OPEN SKY FALLBACK ---
+         if (opposingSupply.bottom > 0 && opposingSupply.bottom > ask) {
+             tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth); 
+         }
+         
+         double reward = (tp > 0) ? (tp - ask) : 0;
+         
+         // If TP is a ghost (0.0) or it doesn't meet minimum RR, force a fixed RR into the open sky!
+         if (tp == 0 || (reward / risk) < MinRiskReward) {
+             tp = ask + (risk * MinRiskReward);
+         }
+         
+         // Final recalculation before sending to broker
+         reward = tp - ask;
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : ""; 
@@ -263,8 +268,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceLimit = entryZone.bottom + (zoneHeightPrice * dynamicMaxPct);   
       
       bool signalFired = false;
-      
-      // Router: Blind Touch vs Confirmation vs Structural Shift
       if (EntryStyle == STYLE_BLIND_TOUCH) {
           if (bid >= entryPriceStart && bid <= entryPriceLimit) signalFired = true;
       } 
@@ -272,7 +275,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
           if (CheckConfirmation(-1, entryPriceStart, entryPriceLimit)) signalFired = true;
       }
       else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
-          // Must be inside the HTF zone, not invalidated, and 15M trend must be strictly BEARISH (-1)
           if (bid >= entryZone.bottom && bid <= entryPriceLimit) {
               if (currentMarketTrend_LTF == -1) signalFired = true;
           }
@@ -281,9 +283,23 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       if (signalFired) 
       {
          double sl = slZone.top + (finalBuffer * point);
-         double tp = opposingDemand.top - ((opposingDemand.top - opposingDemand.bottom) * TPZoneDepth);
-         double risk = sl - bid; 
-         double reward = bid - tp;
+         double risk = sl - bid;
+         double tp = 0;
+         
+         // --- [NEW] TP OPEN SKY FALLBACK ---
+         if (opposingDemand.top > 0 && opposingDemand.top < bid) {
+             tp = opposingDemand.top - ((opposingDemand.top - opposingDemand.bottom) * TPZoneDepth);
+         }
+         
+         double reward = (tp > 0) ? (bid - tp) : 0;
+         
+         // If TP is a ghost (0.0) or it doesn't meet minimum RR, force a fixed RR into the open sky!
+         if (tp == 0 || (reward / risk) < MinRiskReward) {
+             tp = bid - (risk * MinRiskReward);
+         }
+         
+         // Final recalculation before sending to broker
+         reward = bid - tp;
          
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : "";
@@ -315,15 +331,13 @@ void CheckTradeEntry()
    if (PositionsTotal() >= MaxOpenTrades) return;
    
    if (!AllowTrading) return;
-
    if (MinMinutesBetweenTrades > 0 && GlobalLastTradeTime > 0) {
        if (TimeCurrent() - GlobalLastTradeTime < (MinMinutesBetweenTrades * 60)) {
-           return; 
+           return;
        }
    }
 
    double currentADR = CalculateADR(ADR_Period);
-   
    if (Use_ADR_Filter) {
 
        if (currentADR < SectorC_Max_ADR) {
@@ -498,8 +512,9 @@ void ManageOpenPositions() {
       bool isH1Target = (StringFind(comment, "Swing") >= 0 || StringFind(comment, "HTF") >= 0 || StringFind(comment, "Step") >= 0);
       bool trailMoved = false;
 
+      // --- [NEW] SMART TRAIL GHOST GUARD ---
       if (Enable_Smart_Trail && isH1Target) {
-         if (type == POSITION_TYPE_BUY && activeDemand_LTF.isActive) {
+         if (type == POSITION_TYPE_BUY && activeDemand_LTF.isActive && activeDemand_LTF.bottom > 0) { // GUARDRAIL ADDED
              double proposedSL = activeDemand_LTF.bottom - (Smart_Trail_Buffer_Pips * point);
              if (proposedSL > currentSL + point) {
                  if (activeFlippedSupply_LTF.isActive) {
@@ -509,7 +524,7 @@ void ManageOpenPositions() {
                  }
              }
          }
-         else if (type == POSITION_TYPE_SELL && activeSupply_LTF.isActive) {
+         else if (type == POSITION_TYPE_SELL && activeSupply_LTF.isActive && activeSupply_LTF.top > 0) { // GUARDRAIL ADDED
              double proposedSL = activeSupply_LTF.top + (Smart_Trail_Buffer_Pips * point);
              if (proposedSL < currentSL - point) {
                  if (activeFlippedDemand_LTF.isActive) {
@@ -712,7 +727,6 @@ void ExportTransactionsToCSV()
             double historicalADR = 0;
             datetime dealTime = (datetime)HistoryDealGetInteger(ticket_deal, DEAL_TIME);
             int dayShift = iBarShift(_Symbol, PERIOD_D1, dealTime);
-            
             if (dayShift >= 0) {
                 double highBuffer[], lowBuffer[];
                 if (CopyHigh(_Symbol, PERIOD_D1, dayShift + 1, ADR_Period, highBuffer) == ADR_Period &&
@@ -761,7 +775,6 @@ void ExportTransactionsToCSV()
           
           datetime startTest = 0;
           datetime endTest = 0;
-          
           if (total_deals > 0) {
               startTest = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(0), DEAL_TIME);
               endTest   = (datetime)HistoryDealGetInteger(HistoryDealGetTicket(total_deals-1), DEAL_TIME);
