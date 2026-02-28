@@ -91,11 +91,15 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
    } 
 }
 
-// [Keep DrawZigZagLines ... unchanged]
+// *** VISUAL UPDATE: Global Toggle + Dashboard Logic Preserved ***
 void DrawZigZagLines(string suffix, PointStruct &points[]) { 
+   // 1. GLOBAL SPEED TOGGLE (New)
    if (!Show_ZigZag_Lines) return;
+   // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
+   // 3. Clear old objects regardless of dashboard state (Good practice)
    ObjectsDeleteAll(0, "NCI_ZZ_" + suffix);
+   // 4. DASHBOARD CHECK (Preserved)
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
@@ -251,146 +255,145 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
    for(int i=0; i<ArraySize(targetPoints); i++) CalculateZoneLimits(tf, targetPoints[i]);
    CalculateTrendsAndLock(tf, targetPoints, targetTrend); 
 
-   // --- THE MEMORY CACHE ---
+   // --- THE MEMORY CACHE (Declared outside for scope safety) ---
    static datetime cacheTime_HTF[]; static int cacheStatus_HTF[];
    static datetime cacheTime_LTF[]; static int cacheStatus_LTF[];
 
-   // --- [NEW] SWING VS INTERNAL STRUCTURE SEPARATOR ---
-   double activeMacroSupply = 0;  // The Boss Ceiling
-   double activeMacroDemand = 0;  // The Boss Floor
-   double extremeHigh = 0;        // Extreme High of internal structure
-   double extremeLow = 999999;    // Extreme Low of internal structure
+   // =========================================================
+   // THE TOGGLE SWITCH: Strict SMC Logic
+   // =========================================================
+   if (Use_Strict_SMC_Zones) {
 
-   for (int i = 0; i < ArraySize(targetPoints); i++) {
-       if (i == 0) {
-           if (targetPoints[i].type == 1) {
-               activeMacroSupply = targetPoints[i].price;
-               extremeHigh = targetPoints[i].price;
-           } else {
-               activeMacroDemand = targetPoints[i].price;
-               extremeLow = targetPoints[i].price;
+       // --- SWING VS INTERNAL STRUCTURE SEPARATOR ---
+       double activeMacroSupply = 0;  // The Boss Ceiling
+       double activeMacroDemand = 0;  // The Boss Floor
+       double extremeHigh = 0;        // Extreme High of internal structure
+       double extremeLow = 999999;    // Extreme Low of internal structure
+
+       for (int i = 0; i < ArraySize(targetPoints); i++) {
+           if (i == 0) {
+               if (targetPoints[i].type == 1) {
+                   activeMacroSupply = targetPoints[i].price;
+                   extremeHigh = targetPoints[i].price;
+               } else {
+                   activeMacroDemand = targetPoints[i].price;
+                   extremeLow = targetPoints[i].price;
+               }
+               continue;
            }
-           continue;
-       }
 
-       bool isValidated = false;
-       bool isResolved = false; 
-
-       // 1. CHECK THE MEMORY CACHE
-       int cacheSize = (suffix == "_HTF") ? ArraySize(cacheTime_HTF) : ArraySize(cacheTime_LTF);
-       for(int c = 0; c < cacheSize; c++) {
-           datetime cTime = (suffix == "_HTF") ? cacheTime_HTF[c] : cacheTime_LTF[c];
-           if(cTime == targetPoints[i].time) {
-               int cStatus = (suffix == "_HTF") ? cacheStatus_HTF[c] : cacheStatus_LTF[c];
-               isResolved = true;
-               isValidated = (cStatus == 1); 
-               break;
+           bool isValidated = false;
+           bool isResolved = false;
+           
+           // 1. CHECK THE MEMORY CACHE
+           int cacheSize = (suffix == "_HTF") ? ArraySize(cacheTime_HTF) : ArraySize(cacheTime_LTF);
+           for(int c = 0; c < cacheSize; c++) {
+               datetime cTime = (suffix == "_HTF") ? cacheTime_HTF[c] : cacheTime_LTF[c];
+               if(cTime == targetPoints[i].time) {
+                   int cStatus = (suffix == "_HTF") ? cacheStatus_HTF[c] : cacheStatus_LTF[c];
+                   isResolved = true;
+                   isValidated = (cStatus == 1); 
+                   break;
+               }
            }
-       }
 
-       if (targetPoints[i].type == -1) { // PENDING DEMAND (Floor)
-           
-           // Target: If there's an active Boss Ceiling, it MUST break it. 
-           // If we are already in an Uptrend (no active Boss Ceiling), just break the internal extreme High.
-           double targetToBreak = (activeMacroSupply > 0) ? activeMacroSupply : extremeHigh;
-           
-           if (targetToBreak > 0) {
-               if (!isResolved) {
-                   datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetToBreak, 1);
-                   datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, -1);
-                   
-                   if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
-                       bool isOverwritten = false;
-                       for (int j = i + 1; j < ArraySize(targetPoints); j++) {
-                           if (targetPoints[j].type == -1 && targetPoints[j].time < t_break) {
-                               isOverwritten = true; break;
+           if (targetPoints[i].type == -1) { // PENDING DEMAND (Floor)
+               
+               double targetToBreak = (activeMacroSupply > 0) ? activeMacroSupply : extremeHigh;
+               
+               if (targetToBreak > 0) {
+                   if (!isResolved) {
+                       datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetToBreak, 1);
+                       datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, -1);
+                       
+                       if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
+                           bool isOverwritten = false;
+                           for (int j = i + 1; j < ArraySize(targetPoints); j++) {
+                               if (targetPoints[j].type == -1 && targetPoints[j].time < t_break) {
+                                   isOverwritten = true; break;
+                               }
+                           }
+                           if (!isOverwritten) isValidated = true;
+                       }
+
+                       // Lock it in Memory Cache
+                       if (t_break > 0 || t_fail > 0) {
+                           if (suffix == "_HTF") {
+                               int s = ArraySize(cacheTime_HTF);
+                               ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
+                               cacheTime_HTF[s] = targetPoints[i].time; cacheStatus_HTF[s] = isValidated ? 1 : -1;
+                           } else {
+                               int s = ArraySize(cacheTime_LTF);
+                               ArrayResize(cacheTime_LTF, s + 1); ArrayResize(cacheStatus_LTF, s + 1);
+                               cacheTime_LTF[s] = targetPoints[i].time; cacheStatus_LTF[s] = isValidated ? 1 : -1;
                            }
                        }
-                       if (!isOverwritten) isValidated = true; 
                    }
-
-                   // Lock it in Memory Cache
-                   if (t_break > 0 || t_fail > 0) {
-                       if (suffix == "_HTF") {
-                           int s = ArraySize(cacheTime_HTF);
-                           ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
-                           cacheTime_HTF[s] = targetPoints[i].time; cacheStatus_HTF[s] = isValidated ? 1 : -1;
-                       } else {
-                           int s = ArraySize(cacheTime_LTF);
-                           ArrayResize(cacheTime_LTF, s + 1); ArrayResize(cacheStatus_LTF, s + 1);
-                           cacheTime_LTF[s] = targetPoints[i].time; cacheStatus_LTF[s] = isValidated ? 1 : -1;
-                       }
-                   }
+               } else {
+                   isValidated = true;
                }
-           } else {
-               isValidated = true; 
-           }
 
-           if (isValidated) {
-               // A new Macro Demand Floor is established!
-               activeMacroDemand = targetPoints[i].price; 
-               extremeLow = targetPoints[i].price; // Reset extreme low tracking
-               activeMacroSupply = 0;              // The downtrend is dead!
-           } else {
-               // Ghost it.
-               targetPoints[i].zoneLimitTop = 0;
-               targetPoints[i].zoneLimitBottom = 0;
-               // Always track the extreme absolute low of the internal chop!
-               if (targetPoints[i].price < extremeLow) extremeLow = targetPoints[i].price;
+               if (isValidated) {
+                   activeMacroDemand = targetPoints[i].price; 
+                   extremeLow = targetPoints[i].price; 
+                   activeMacroSupply = 0;
+               } else {
+                   targetPoints[i].zoneLimitTop = 0;
+                   targetPoints[i].zoneLimitBottom = 0;
+                   if (targetPoints[i].price < extremeLow) extremeLow = targetPoints[i].price;
+               }
            }
-       }
-       else if (targetPoints[i].type == 1) { // PENDING SUPPLY (Ceiling)
-           
-           // Target: If there's an active Boss Floor, it MUST break it. 
-           // If we are already in a Downtrend (no Boss Floor), break the internal extreme Low.
-           double targetToBreak = (activeMacroDemand > 0) ? activeMacroDemand : extremeLow;
-           
-           if (targetToBreak > 0 && targetToBreak != 999999) {
-               if (!isResolved) {
-                   datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetToBreak, -1);
-                   datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, 1);
-                   
-                   if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
-                       bool isOverwritten = false;
-                       for (int j = i + 1; j < ArraySize(targetPoints); j++) {
-                           if (targetPoints[j].type == 1 && targetPoints[j].time < t_break) {
-                               isOverwritten = true; break;
+           else if (targetPoints[i].type == 1) { // PENDING SUPPLY (Ceiling)
+               
+               double targetToBreak = (activeMacroDemand > 0) ? activeMacroDemand : extremeLow;
+               
+               if (targetToBreak > 0 && targetToBreak != 999999) {
+                   if (!isResolved) {
+                       datetime t_break = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetToBreak, -1);
+                       datetime t_fail = FindBreakoutTime(tf, targetPoints[i].barIndex, 0, targetPoints[i].price, 1);
+                       
+                       if (t_break > 0 && (t_fail == 0 || t_break < t_fail)) {
+                           bool isOverwritten = false;
+                           for (int j = i + 1; j < ArraySize(targetPoints); j++) {
+                               if (targetPoints[j].type == 1 && targetPoints[j].time < t_break) {
+                                   isOverwritten = true; break;
+                               }
+                           }
+                           if (!isOverwritten) isValidated = true;
+                       }
+
+                       // Lock it in Memory Cache
+                       if (t_break > 0 || t_fail > 0) {
+                           if (suffix == "_HTF") {
+                               int s = ArraySize(cacheTime_HTF);
+                               ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
+                               cacheTime_HTF[s] = targetPoints[i].time; cacheStatus_HTF[s] = isValidated ? 1 : -1;
+                           } else {
+                               int s = ArraySize(cacheTime_LTF);
+                               ArrayResize(cacheTime_LTF, s + 1); ArrayResize(cacheStatus_LTF, s + 1);
+                               cacheTime_LTF[s] = targetPoints[i].time; cacheStatus_LTF[s] = isValidated ? 1 : -1;
                            }
                        }
-                       if (!isOverwritten) isValidated = true; 
                    }
-
-                   // Lock it in Memory Cache
-                   if (t_break > 0 || t_fail > 0) {
-                       if (suffix == "_HTF") {
-                           int s = ArraySize(cacheTime_HTF);
-                           ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
-                           cacheTime_HTF[s] = targetPoints[i].time; cacheStatus_HTF[s] = isValidated ? 1 : -1;
-                       } else {
-                           int s = ArraySize(cacheTime_LTF);
-                           ArrayResize(cacheTime_LTF, s + 1); ArrayResize(cacheStatus_LTF, s + 1);
-                           cacheTime_LTF[s] = targetPoints[i].time; cacheStatus_LTF[s] = isValidated ? 1 : -1;
-                       }
-                   }
+               } else {
+                   isValidated = true;
                }
-           } else {
-               isValidated = true; 
-           }
 
-           if (isValidated) {
-               // A new Macro Supply Ceiling is established!
-               activeMacroSupply = targetPoints[i].price;
-               extremeHigh = targetPoints[i].price; // Reset extreme high tracking
-               activeMacroDemand = 0;               // The uptrend is dead!
-           } else {
-               // Ghost it.
-               targetPoints[i].zoneLimitTop = 0;
-               targetPoints[i].zoneLimitBottom = 0;
-               // Always track the extreme absolute high of the internal chop!
-               if (targetPoints[i].price > extremeHigh) extremeHigh = targetPoints[i].price;
+               if (isValidated) {
+                   activeMacroSupply = targetPoints[i].price;
+                   extremeHigh = targetPoints[i].price; 
+                   activeMacroDemand = 0;
+               } else {
+                   targetPoints[i].zoneLimitTop = 0;
+                   targetPoints[i].zoneLimitBottom = 0;
+                   if (targetPoints[i].price > extremeHigh) extremeHigh = targetPoints[i].price;
+               }
            }
        }
    }
+   // =========================================================
+   // END OF TOGGLE SWITCH
+   // =========================================================
 
-   DrawZigZagLines(suffix, targetPoints); 
+   DrawZigZagLines(suffix, targetPoints);
 }

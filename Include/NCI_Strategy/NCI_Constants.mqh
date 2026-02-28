@@ -8,19 +8,16 @@ enum ENUM_REENTRY_MODE {
    MODE_DOUBLE   = 1, 
    MODE_INFINITE = 2  
 };
-
 enum ENUM_ENTRY_STYLE {
    STYLE_BLIND_TOUCH      = 0, // Fire instantly when price touches zone
    STYLE_CONFIRMATION     = 1, // Wait for closed candle pattern in zone
    STYLE_STRUCTURAL_SHIFT = 2  // [NEW] Wait for 15M Trend to flip inside zone
 };
-
 enum ENUM_CONFIRM_PATTERN {
    PATTERN_PINBAR    = 0,  // Long Wick Rejection
    PATTERN_ENGULFING = 1,  // Momentum Shift
    PATTERN_ANY       = 2   // Accept either Pinbar OR Engulfing
 };
-
 // ==============================================================================
 // GROUP 1: STRATEGY & TIMEFRAMES (The Core Engine)
 // ==============================================================================
@@ -77,8 +74,8 @@ input double MaxBufferPoints  = 200;
 // ==============================================================================
 
 input group "Take Profit Target Logic"
-input double MinRiskReward       = 2.0;   // Minimum RR to accept a trade
-input double TPZoneDepth         = 0.0;   // Where to place the physical TP inside opposing zone
+input double MinRiskReward       = 2.0; // Minimum RR to accept a trade
+input double TPZoneDepth         = 0.0; // Where to place the physical TP inside opposing zone
 
 input group "Profit Locking (Percentages)"
 input bool   EnableProfitLocking = true;
@@ -96,19 +93,19 @@ input double RR_Lock_Target      = 3.5;   // Bank at 1:3.5 RR
 input group "Smart Trailing & Exits"
 input bool   Enable_Smart_Trail      = false; // Trail behind M15 structure
 input double Smart_Trail_Buffer_Pips = 10.0;  
-input bool   Enable_Friday_Close     = true;      // Close high profit trades on Friday
-input int    Friday_Close_Hour       = 20;        // Server hour to start checking
-input double Account_Initial_Balance = 10000.0;   // FTMO Initial Balance for Risk Calc
-input double Friday_Min_RR           = 3.0;       // Close if Profit > (RiskAmount * 3.0)
+input bool   Enable_Friday_Close     = true;  // Close high profit trades on Friday
+input int    Friday_Close_Hour       = 20;    // Server hour to start checking
+input double Account_Initial_Balance = 10000.0; // FTMO Initial Balance for Risk Calc
+input double Friday_Min_RR           = 3.0;   // Close if Profit > (RiskAmount * 3.0)
 
 // ==============================================================================
 // GROUP 4: FILTERS (The Brakes - Trade Less)
 // ==============================================================================
 
 input group "Traffic Control"
-input bool   AllowTrading            = true;  // Master Safety Switch
-input int    MaxOpenTrades           = 2;     // Max simultaneous trades allowed
-input int    MinMinutesBetweenTrades = 60;    // Minimum minutes between opening trades
+input bool   AllowTrading            = true; // Master Safety Switch
+input int    MaxOpenTrades           = 2;    // Max simultaneous trades allowed
+input int    MinMinutesBetweenTrades = 60;   // Minimum minutes between opening trades
 
 input group "Time Filter Settings"
 input bool   UseTimeFilter = true; // Enable Session Filtering
@@ -120,37 +117,38 @@ input bool UseToxicFilter         = false; // Block counter-trend scalps
 input bool ZiZ_BlockStepSell      = true;  // Block bear market step-sells
 
 input group "Structure Rules"
+input bool   Use_Strict_SMC_Zones = true;  // [NEW] TRUE = SMC Breakout Logic | FALSE = Old Draw-All Logic
 input double MinBodyPercent = 0.50;  
 input int MaxScanDistance   = 3;
 input double BigCandleFactor = 1.3; 
 
 input group "Spread & Candle Filters"
 input bool   UseVolatilityGuard = true;
-input int    MaxSpreadPoints    = 25;      // Strict spread filter (2.5 pips)
-input int    MaxCandleSizePips  = 25;      // Strict candle filter (25 pips)
+input int    MaxSpreadPoints    = 25; // Strict spread filter (2.5 pips)
+input int    MaxCandleSizePips  = 25; // Strict candle filter (25 pips)
 
 input group "ADR Market Regimes"
-input bool   Use_ADR_Filter        = true;    // [MASTER SWITCH] Enable ADR Filtering
-input int    ADR_Period            = 5;       // Days to average
-input double ADR_Min_Pips          = 70.0;    // Floor for Normal Trend Mode
-input double ADR_Max_Pips          = 85.0;    // Ceiling for Normal Trend Mode
-input bool   Enable_SectorC_Range  = true;    // Enable Range Fade below threshold
-input double SectorC_Max_ADR       = 70.0;    // Below this ADR = Range Mode
-input bool   Enable_SectorE_Storm  = true;    // Enable Deep Entries for High Volatility
-input double SectorE_Min_ADR       = 85.0;    // Above this = Storm Mode
-input double Storm_Entry_Depth     = 0.70;    // 60% Deep (Wait for crash)
-input double Storm_Buffer_Pips     = 15.0;    // Wide Stop Loss
-input double Storm_Max_Entry_Clamp = 0.85;    // Max allowed depth for Storm entry
-input double Storm_Max_Limit_Clamp = 0.90;    // Max allowed depth for Storm limit
+input bool   Use_ADR_Filter        = true; // [MASTER SWITCH] Enable ADR Filtering
+input int    ADR_Period            = 5;    // Days to average
+input double ADR_Min_Pips          = 70.0; // Floor for Normal Trend Mode
+input double ADR_Max_Pips          = 85.0; // Ceiling for Normal Trend Mode
+input bool   Enable_SectorC_Range  = true; // Enable Range Fade below threshold
+input double SectorC_Max_ADR       = 70.0; // Below this ADR = Range Mode
+input bool   Enable_SectorE_Storm  = true; // Enable Deep Entries for High Volatility
+input double SectorE_Min_ADR       = 85.0; // Above this = Storm Mode
+input double Storm_Entry_Depth     = 0.70; // 60% Deep (Wait for crash)
+input double Storm_Buffer_Pips     = 15.0; // Wide Stop Loss
+input double Storm_Max_Entry_Clamp = 0.85; // Max allowed depth for Storm entry
+input double Storm_Max_Limit_Clamp = 0.90; // Max allowed depth for Storm limit
 
 // ==============================================================================
 // GROUP 5: VISUALS & STATISTICS (Utilities)
 // ==============================================================================
 
 input group "Visual Settings"
-input bool Show_ZigZag_Lines = true;   // Toggle ZigZag Lines (Turn OFF for speed)
-input bool Show_Zone_Boxes   = true;   // Toggle Zone Boxes (Turn OFF for speed)
-input bool Debug_Show_Spread = true;   // Print Spread Log for every entry attempt
+input bool Show_ZigZag_Lines = true; // Toggle ZigZag Lines (Turn OFF for speed)
+input bool Show_Zone_Boxes   = true; // Toggle Zone Boxes (Turn OFF for speed)
+input bool Debug_Show_Spread = true; // Print Spread Log for every entry attempt
 input int  HistoryBars       = 5000;
 input int  LineWidth         = 2;
 color SupplyColor     = clrMaroon; 
