@@ -33,11 +33,9 @@ void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double 
    string name = "NCI_Zone_" + suffix + IntegerToString(id) + "_" + TimeToString(t1);
    color c;
    if (suffix == "_HTF") {
-       c = (type == 1) ?
-       clrIndianRed : clrMediumSeaGreen; 
+       c = (type == 1) ? clrIndianRed : clrMediumSeaGreen; 
    } else {
-       c = (type == 1) ?
-       SupplyColor : DemandColor; 
+       c = (type == 1) ? SupplyColor : DemandColor; 
    }
 
    // MQL5 Fix: Changed OBJPROP_TIME2 to OBJPROP_TIME, 1
@@ -78,7 +76,6 @@ void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
    }
 }
 
-// [Keep Logic Functions: FindFutureTarget, CheckZoneLife ... unchanged]
 double FindFutureTarget(PointStruct &points[], int currentIndex, int targetType, double referencePrice)
 {
    int totalPoints = ArraySize(points);
@@ -114,9 +111,7 @@ datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double target
    return 0; 
 }
 
-// *** UPDATED: VISUAL TOGGLE & SPEED FIX ***
 void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneState &activeSup, MergedZoneState &activeDem, MergedZoneState &activeFlipSup, MergedZoneState &activeFlipDem, string suffix) { 
-   // 1. SPEED FIX: Only delete objects if NOT optimizing AND Global Toggle is ON
    if (!MQLInfoInteger(MQL_OPTIMIZATION) && Show_Zone_Boxes) {
        ObjectsDeleteAll(0, "NCI_Zone_" + suffix);
        ObjectsDeleteAll(0, "NCI_Flip_" + suffix); 
@@ -132,10 +127,7 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    MergedZoneState demand; demand.isActive = false;
    for (int i = 0; i < count; i++) { 
       PointStruct p = points[i];
-
-      // --- [NEW] THE ZONE VALIDATOR GHOST FILTER ---
-      // If the ZigZag Validator set the limits to 0, this is a ghost zone (No Break of Structure).
-      // Skip it completely so it doesn't overwrite our real institutional zones!
+      // --- THE ZONE VALIDATOR GHOST FILTER ---
       if (p.zoneLimitTop == 0 && p.zoneLimitBottom == 0) continue;
 
       if (p.type == 1) { // SUPPLY
@@ -246,21 +238,86 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
       } 
    } 
    
-   // --- ZOMBIE FIX: SCAN HISTORY WITH STRICT RULES ---
+   // --- [FIXED] ZOMBIE FIX: NOW CORRECTLY DRAWS FLIPPED ZONES IN STRICT MODE ---
    if (supply.isActive) {
       int startBar = iBarShift(_Symbol, tf, supply.startTime);
       datetime deadTime = FindBreakoutTime(tf, startBar, 0, supply.top, 1);
       if(deadTime > 0) {
-         supply.isActive = false;
          DrawSingleZone(suffix, supply.startTime, deadTime, supply.top, supply.bottom, 1, 999991); 
+         supply.isActive = false;
+         
+         // 1. Clear out old Flipped Zones
+         if (activeFlipDem.isActive) {
+             datetime end = deadTime;
+             if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < deadTime) end = activeFlipDem.endTime;
+             DrawFlippedZone(suffix, activeFlipDem, end); 
+             activeFlipDem.isActive = false;
+         }
+         if (activeFlipSup.isActive) {
+             datetime end = deadTime;
+             if (activeFlipSup.endTime > 0 && activeFlipSup.endTime < deadTime) end = activeFlipSup.endTime;
+             DrawFlippedZone(suffix, activeFlipSup, end); 
+             activeFlipSup.isActive = false;
+         }
+
+         // 2. Spawn the new Gray Boss Breaker Block
+         MergedZoneState flip = supply;
+         flip.isActive = true;
+         flip.startTime = deadTime;
+         
+         int breakBar = iBarShift(_Symbol, tf, deadTime);
+         double futureTarget = FindFutureTarget(points, count-1, 1, supply.top);
+         datetime deathTime = CheckZoneLife(tf, breakBar, 1, futureTarget, supply.bottom);
+         
+         activeFlipDem = flip;
+         if (deathTime == 0) {
+             activeFlipDem.endTime = 0;
+             DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
+         } else {
+             activeFlipDem.endTime = deathTime;
+             DrawFlippedZone(suffix, flip, deathTime); 
+         }
       }
    }
+   
    if (demand.isActive) {
       int startBar = iBarShift(_Symbol, tf, demand.startTime);
       datetime deadTime = FindBreakoutTime(tf, startBar, 0, demand.bottom, -1);
       if(deadTime > 0) {
-         demand.isActive = false;
          DrawSingleZone(suffix, demand.startTime, deadTime, demand.top, demand.bottom, -1, 999992); 
+         demand.isActive = false;
+         
+         // 1. Clear out old Flipped Zones
+         if (activeFlipDem.isActive) {
+             datetime end = deadTime;
+             if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < deadTime) end = activeFlipDem.endTime;
+             DrawFlippedZone(suffix, activeFlipDem, end); 
+             activeFlipDem.isActive = false;
+         }
+         if (activeFlipSup.isActive) {
+             datetime end = deadTime;
+             if (activeFlipSup.endTime > 0 && activeFlipSup.endTime < deadTime) end = activeFlipSup.endTime;
+             DrawFlippedZone(suffix, activeFlipSup, end); 
+             activeFlipSup.isActive = false;
+         }
+
+         // 2. Spawn the new Gray Boss Breaker Block
+         MergedZoneState flip = demand;
+         flip.isActive = true;
+         flip.startTime = deadTime;
+         
+         int breakBar = iBarShift(_Symbol, tf, deadTime);
+         double futureTarget = FindFutureTarget(points, count-1, -1, demand.bottom);
+         datetime deathTime = CheckZoneLife(tf, breakBar, -1, futureTarget, demand.top);
+         
+         activeFlipSup = flip;
+         if (deathTime == 0) {
+             activeFlipSup.endTime = 0;
+             DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
+         } else {
+             activeFlipSup.endTime = deathTime;
+             DrawFlippedZone(suffix, flip, deathTime); 
+         }
       }
    }
    
@@ -269,6 +326,5 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    
    activeSup = supply; 
    activeDem = demand;
-   // FIX: Changed 'DrawZones' to 'Show_Zone_Boxes'
    if(!MQLInfoInteger(MQL_OPTIMIZATION) && Show_Zone_Boxes) ChartRedraw(); 
 }

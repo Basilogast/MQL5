@@ -6,46 +6,154 @@
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh"
 
-// [Keep CalculateTrendsAndLock ... unchanged]
-void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &marketTrend) { 
+// --- [FIXED] TREND CALCULATOR (AMNESIA BUG PATCHED) ---
+void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &marketTrend, string suffix, bool &resolved[]) { 
    int count = ArraySize(points);
    if (count < 2) return; 
    int runningTrend = 0; 
    double lastSupplyLevel = 0; int lastSupplyIdx = -1;
    double lastDemandLevel = 0; int lastDemandIdx = -1; 
    double prevHigh = 0; double prevLow = 0;
+
+   // --- STATIC MEMORY CACHE ---
+   static datetime tCacheTime_HTF[]; static int tCacheTrend_HTF[];
+   static double tCacheSL_HTF[]; static int tCacheSI_HTF[];
+   static double tCacheDL_HTF[]; static int tCacheDI_HTF[];
+   static double tCachePH_HTF[]; static double tCachePL_HTF[];
+
+   static datetime tCacheTime_LTF[]; static int tCacheTrend_LTF[];
+   static double tCacheSL_LTF[]; static int tCacheSI_LTF[];
+   static double tCacheDL_LTF[]; static int tCacheDI_LTF[];
+   static double tCachePH_LTF[]; static double tCachePL_LTF[];
+
    for (int i = 1; i < count; i++) { 
       PointStruct p = points[i];
       PointStruct prev = points[i-1]; 
-      if (prev.type == 1) { lastSupplyLevel = prev.zoneLimitTop; lastSupplyIdx = prev.barIndex; prevHigh = prev.price;
+
+      // 1. CHECK THE MEMORY CACHE (ONLY IF THE POINT IS FULLY RESOLVED BY SMC!)
+      bool useCache = false;
+      if (resolved[i]) { 
+         int cacheSize = (suffix == "_HTF") ? ArraySize(tCacheTime_HTF) : ArraySize(tCacheTime_LTF);
+         for (int c = 0; c < cacheSize; c++) {
+            datetime cTime = (suffix == "_HTF") ? tCacheTime_HTF[c] : tCacheTime_LTF[c];
+            if (cTime == p.time) {
+               useCache = true;
+               if (suffix == "_HTF") {
+                  runningTrend = tCacheTrend_HTF[c];
+                  lastSupplyLevel = tCacheSL_HTF[c]; lastSupplyIdx = tCacheSI_HTF[c];
+                  lastDemandLevel = tCacheDL_HTF[c]; lastDemandIdx = tCacheDI_HTF[c];
+                  prevHigh = tCachePH_HTF[c]; prevLow = tCachePL_HTF[c];
+               } else {
+                  runningTrend = tCacheTrend_LTF[c];
+                  lastSupplyLevel = tCacheSL_LTF[c]; lastSupplyIdx = tCacheSI_LTF[c];
+                  lastDemandLevel = tCacheDL_LTF[c]; lastDemandIdx = tCacheDI_LTF[c];
+                  prevHigh = tCachePH_LTF[c]; prevLow = tCachePL_LTF[c];
+               }
+               points[i].assignedTrend = runningTrend;
+               break;
+            }
+         }
+      }
+
+      if (useCache) continue; // IF CACHED, SKIP THE MATH!
+
+      // 2. IF NOT CACHED, CALCULATE IT
+      if (prev.type == 1 && prev.zoneLimitTop > 0) { 
+          lastSupplyLevel = prev.zoneLimitTop; 
+          lastSupplyIdx = prev.barIndex; 
+          prevHigh = prev.price;
       } 
-      if (prev.type == -1) { lastDemandLevel = prev.zoneLimitBottom; lastDemandIdx = prev.barIndex;
-      prevLow = prev.price; } 
+      if (prev.type == -1 && prev.zoneLimitBottom > 0) { 
+          lastDemandLevel = prev.zoneLimitBottom; 
+          lastDemandIdx = prev.barIndex;
+          prevLow = prev.price; 
+      } 
       
       bool brokenSupply = false;
       bool brokenDemand = false; 
       
-      if (lastSupplyIdx != -1) {
+      if (lastSupplyIdx != -1 && lastSupplyLevel > 0) {
          brokenSupply = CheckForBreakout(tf, lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
       }
       
-      if (lastDemandIdx != -1) {
+      if (lastDemandIdx != -1 && lastDemandLevel > 0) {
          brokenDemand = CheckForBreakout(tf, lastDemandIdx, p.barIndex, lastDemandLevel, -1);
       }
 
-      if (runningTrend == -1) { if (brokenSupply) runningTrend = 0;
+      // --- THE AMNESIA FIX: CUT THE CORD TO ANCIENT MEMORIES ---
+      if (runningTrend == -1) { 
+          if (brokenSupply) {
+              runningTrend = 0;
+              // Downtrend is dead. Erase the ancient Boss Demand memory so it doesn't falsely pull us back!
+              lastDemandLevel = 0; lastDemandIdx = -1; prevLow = 0; brokenDemand = false;
+          }
       } 
-      else if (runningTrend == 1) { if (brokenDemand) runningTrend = 0;
+      else if (runningTrend == 1) { 
+          if (brokenDemand) {
+              runningTrend = 0;
+              // Uptrend is dead. Erase the ancient Boss Supply memory so it doesn't falsely pull us back!
+              lastSupplyLevel = 0; lastSupplyIdx = -1; prevHigh = 0; brokenSupply = false;
+          }
       } 
       else { 
-         if (p.type == 1) { if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) { if (!brokenDemand) runningTrend = 1;
-         } } 
-         if (p.type == -1) { if (brokenDemand || (prevLow != 0 && p.price < prevLow)) { if (!brokenSupply) runningTrend = -1;
-         } } 
-         if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) runningTrend = 1;
-         if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) runningTrend = -1;
+         if (p.type == 1) { 
+             if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) { 
+                 if (!brokenDemand) {
+                     runningTrend = 1;
+                     // New Uptrend officially born! Clear old Demand memories.
+                     lastDemandLevel = 0; lastDemandIdx = -1; prevLow = 0;
+                 }
+             } 
+         } 
+         if (p.type == -1) { 
+             if (brokenDemand || (prevLow != 0 && p.price < prevLow)) { 
+                 if (!brokenSupply) {
+                     runningTrend = -1;
+                     // New Downtrend officially born! Clear old Supply memories.
+                     lastSupplyLevel = 0; lastSupplyIdx = -1; prevHigh = 0;
+                 }
+             } 
+         } 
+         // Fallback Overrides
+         if (runningTrend == 0) {
+             if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) {
+                 runningTrend = 1;
+                 lastDemandLevel = 0; lastDemandIdx = -1; prevLow = 0;
+             }
+             if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) {
+                 runningTrend = -1;
+                 lastSupplyLevel = 0; lastSupplyIdx = -1; prevHigh = 0;
+             }
+         }
       } 
       points[i].assignedTrend = runningTrend; 
+
+      // 3. SAVE TO MEMORY CACHE (ONLY IF THE POINT IS FULLY RESOLVED BY SMC!)
+      if (resolved[i]) {
+         if (suffix == "_HTF") {
+            int s = ArraySize(tCacheTime_HTF);
+            ArrayResize(tCacheTime_HTF, s + 1); ArrayResize(tCacheTrend_HTF, s + 1);
+            ArrayResize(tCacheSL_HTF, s + 1); ArrayResize(tCacheSI_HTF, s + 1);
+            ArrayResize(tCacheDL_HTF, s + 1); ArrayResize(tCacheDI_HTF, s + 1);
+            ArrayResize(tCachePH_HTF, s + 1); ArrayResize(tCachePL_HTF, s + 1);
+
+            tCacheTime_HTF[s] = p.time; tCacheTrend_HTF[s] = runningTrend;
+            tCacheSL_HTF[s] = lastSupplyLevel; tCacheSI_HTF[s] = lastSupplyIdx;
+            tCacheDL_HTF[s] = lastDemandLevel; tCacheDI_HTF[s] = lastDemandIdx;
+            tCachePH_HTF[s] = prevHigh; tCachePL_HTF[s] = prevLow;
+         } else {
+            int s = ArraySize(tCacheTime_LTF);
+            ArrayResize(tCacheTime_LTF, s + 1); ArrayResize(tCacheTrend_LTF, s + 1);
+            ArrayResize(tCacheSL_LTF, s + 1); ArrayResize(tCacheSI_LTF, s + 1);
+            ArrayResize(tCacheDL_LTF, s + 1); ArrayResize(tCacheDI_LTF, s + 1);
+            ArrayResize(tCachePH_LTF, s + 1); ArrayResize(tCachePL_LTF, s + 1);
+
+            tCacheTime_LTF[s] = p.time; tCacheTrend_LTF[s] = runningTrend;
+            tCacheSL_LTF[s] = lastSupplyLevel; tCacheSI_LTF[s] = lastSupplyIdx;
+            tCacheDL_LTF[s] = lastDemandLevel; tCacheDI_LTF[s] = lastDemandIdx;
+            tCachePH_LTF[s] = prevHigh; tCachePL_LTF[s] = prevLow;
+         }
+      }
    } 
    marketTrend = runningTrend;
 }
@@ -91,15 +199,10 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
    } 
 }
 
-// *** VISUAL UPDATE: Global Toggle + Dashboard Logic Preserved ***
 void DrawZigZagLines(string suffix, PointStruct &points[]) { 
-   // 1. GLOBAL SPEED TOGGLE (New)
    if (!Show_ZigZag_Lines) return;
-   // 2. SPEED FIX: Stop here if optimizing
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
-   // 3. Clear old objects regardless of dashboard state (Good practice)
    ObjectsDeleteAll(0, "NCI_ZZ_" + suffix);
-   // 4. DASHBOARD CHECK (Preserved)
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
 
@@ -253,24 +356,27 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
       } 
    } 
    for(int i=0; i<ArraySize(targetPoints); i++) CalculateZoneLimits(tf, targetPoints[i]);
-   CalculateTrendsAndLock(tf, targetPoints, targetTrend); 
 
-   // --- THE MEMORY CACHE (Declared outside for scope safety) ---
    static datetime cacheTime_HTF[]; static int cacheStatus_HTF[];
    static datetime cacheTime_LTF[]; static int cacheStatus_LTF[];
+
+   // --- THE RESOLVED FLAG ARRAY ---
+   bool resolvedPoints[];
+   int ptsCount = ArraySize(targetPoints);
+   ArrayResize(resolvedPoints, ptsCount);
+   for(int i=0; i<ptsCount; i++) resolvedPoints[i] = true; 
 
    // =========================================================
    // THE TOGGLE SWITCH: Strict SMC Logic
    // =========================================================
    if (Use_Strict_SMC_Zones) {
 
-       // --- SWING VS INTERNAL STRUCTURE SEPARATOR ---
-       double activeMacroSupply = 0;  // The Boss Ceiling
-       double activeMacroDemand = 0;  // The Boss Floor
-       double extremeHigh = 0;        // Extreme High of internal structure
-       double extremeLow = 999999;    // Extreme Low of internal structure
+       double activeMacroSupply = 0;
+       double activeMacroDemand = 0;
+       double extremeHigh = 0;
+       double extremeLow = 999999;
 
-       for (int i = 0; i < ArraySize(targetPoints); i++) {
+       for (int i = 0; i < ptsCount; i++) {
            if (i == 0) {
                if (targetPoints[i].type == 1) {
                    activeMacroSupply = targetPoints[i].price;
@@ -279,13 +385,13 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                    activeMacroDemand = targetPoints[i].price;
                    extremeLow = targetPoints[i].price;
                }
+               resolvedPoints[i] = true;
                continue;
            }
 
            bool isValidated = false;
            bool isResolved = false;
            
-           // 1. CHECK THE MEMORY CACHE
            int cacheSize = (suffix == "_HTF") ? ArraySize(cacheTime_HTF) : ArraySize(cacheTime_LTF);
            for(int c = 0; c < cacheSize; c++) {
                datetime cTime = (suffix == "_HTF") ? cacheTime_HTF[c] : cacheTime_LTF[c];
@@ -298,7 +404,6 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
            }
 
            if (targetPoints[i].type == -1) { // PENDING DEMAND (Floor)
-               
                double targetToBreak = (activeMacroSupply > 0) ? activeMacroSupply : extremeHigh;
                
                if (targetToBreak > 0) {
@@ -316,8 +421,9 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                            if (!isOverwritten) isValidated = true;
                        }
 
-                       // Lock it in Memory Cache
                        if (t_break > 0 || t_fail > 0) {
+                           isResolved = true; // ZONE HAS OFFICIALLY WON OR DIED!
+                           
                            if (suffix == "_HTF") {
                                int s = ArraySize(cacheTime_HTF);
                                ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
@@ -331,6 +437,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                    }
                } else {
                    isValidated = true;
+                   isResolved = true;
                }
 
                if (isValidated) {
@@ -342,9 +449,10 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                    targetPoints[i].zoneLimitBottom = 0;
                    if (targetPoints[i].price < extremeLow) extremeLow = targetPoints[i].price;
                }
+               
+               resolvedPoints[i] = isResolved; // Lock the handshake
            }
            else if (targetPoints[i].type == 1) { // PENDING SUPPLY (Ceiling)
-               
                double targetToBreak = (activeMacroDemand > 0) ? activeMacroDemand : extremeLow;
                
                if (targetToBreak > 0 && targetToBreak != 999999) {
@@ -362,8 +470,9 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                            if (!isOverwritten) isValidated = true;
                        }
 
-                       // Lock it in Memory Cache
                        if (t_break > 0 || t_fail > 0) {
+                           isResolved = true; // ZONE HAS OFFICIALLY WON OR DIED!
+
                            if (suffix == "_HTF") {
                                int s = ArraySize(cacheTime_HTF);
                                ArrayResize(cacheTime_HTF, s + 1); ArrayResize(cacheStatus_HTF, s + 1);
@@ -377,6 +486,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                    }
                } else {
                    isValidated = true;
+                   isResolved = true;
                }
 
                if (isValidated) {
@@ -388,12 +498,16 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                    targetPoints[i].zoneLimitBottom = 0;
                    if (targetPoints[i].price > extremeHigh) extremeHigh = targetPoints[i].price;
                }
+
+               resolvedPoints[i] = isResolved; // Lock the handshake
            }
        }
    }
    // =========================================================
    // END OF TOGGLE SWITCH
    // =========================================================
+
+   CalculateTrendsAndLock(tf, targetPoints, targetTrend, suffix, resolvedPoints); 
 
    DrawZigZagLines(suffix, targetPoints);
 }
