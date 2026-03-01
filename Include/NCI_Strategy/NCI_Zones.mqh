@@ -93,19 +93,20 @@ double FindFutureTarget(PointStruct &points[], int currentIndex, int targetType,
    return 0;
 }
 
-datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double targetLevel, double selfBreakLevel)
+// *** UPDATED: IMMUNITY FLAG FOR FLIPPED ZONES ***
+datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double targetLevel, double selfBreakLevel, bool isFlipped = false)
 {
    for(int i = startBar - 1; i > 0; i--) 
    {
       if (targetLevel != 0) {
-          if (type == 1) { if (CheckForBreakout(tf, i+1, i, targetLevel, 1)) return GetTime(tf, i);
-          } 
-          else { if (CheckForBreakout(tf, i+1, i, targetLevel, -1)) return GetTime(tf, i);
-          }
+          if (type == 1) { if (CheckForBreakout(tf, i+1, i, targetLevel, 1)) return GetTime(tf, i); } 
+          else { if (CheckForBreakout(tf, i+1, i, targetLevel, -1)) return GetTime(tf, i); }
       }
-      if (type == 1) { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, -1)) return GetTime(tf, i);
-      } 
-      else { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, 1)) return GetTime(tf, i);
+      
+      // THE FIX: If it is a Flipped Zone (Breaker Block), it is immune to being pierced!
+      if (!isFlipped) {
+          if (type == 1) { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, -1)) return GetTime(tf, i); } 
+          else { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, 1)) return GetTime(tf, i); }
       }
    }
    return 0; 
@@ -136,7 +137,9 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
             datetime preciseBreakTime = FindBreakoutTime(tf, supply.lastBarIndex, p.barIndex, supply.top, 1);
             if (preciseBreakTime > 0) { 
                DrawSingleZone(suffix, supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1);
-               if (p.assignedTrend != 1) { 
+               
+               // --- THE HISTORICAL AMNESIA FIX: BYPASS RETAIL FILTER IN STRICT SMC MODE ---
+               if (Use_Strict_SMC_Zones || p.assignedTrend != 1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
@@ -154,7 +157,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    double futureTarget = FindFutureTarget(points, i, 1, supply.top);
-                   datetime deathTime = CheckZoneLife(tf, p.barIndex, 1, futureTarget, supply.bottom);
+                   // FIX: Pass true for immunity
+                   datetime deathTime = CheckZoneLife(tf, p.barIndex, 1, futureTarget, supply.bottom, true);
                    
                    activeFlipDem = flip;
                    if (deathTime == 0) {
@@ -189,7 +193,9 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
             datetime preciseBreakTime = FindBreakoutTime(tf, demand.lastBarIndex, p.barIndex, demand.bottom, -1);
             if (preciseBreakTime > 0) { 
                DrawSingleZone(suffix, demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1);
-               if (p.assignedTrend != -1) { 
+               
+               // --- THE HISTORICAL AMNESIA FIX: BYPASS RETAIL FILTER IN STRICT SMC MODE ---
+               if (Use_Strict_SMC_Zones || p.assignedTrend != -1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
@@ -207,7 +213,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                    flip.isActive = true;
                    flip.startTime = preciseBreakTime; 
                    double futureTarget = FindFutureTarget(points, i, -1, demand.bottom);
-                   datetime deathTime = CheckZoneLife(tf, p.barIndex, -1, futureTarget, demand.top);
+                   // FIX: Pass true for immunity
+                   datetime deathTime = CheckZoneLife(tf, p.barIndex, -1, futureTarget, demand.top, true);
                    
                    activeFlipSup = flip;
                    if (deathTime == 0) {
@@ -267,7 +274,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
          
          int breakBar = iBarShift(_Symbol, tf, deadTime);
          double futureTarget = FindFutureTarget(points, count-1, 1, supply.top);
-         datetime deathTime = CheckZoneLife(tf, breakBar, 1, futureTarget, supply.bottom);
+         // FIX: Pass true for immunity
+         datetime deathTime = CheckZoneLife(tf, breakBar, 1, futureTarget, supply.bottom, true);
          
          activeFlipDem = flip;
          if (deathTime == 0) {
@@ -308,7 +316,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
          
          int breakBar = iBarShift(_Symbol, tf, deadTime);
          double futureTarget = FindFutureTarget(points, count-1, -1, demand.bottom);
-         datetime deathTime = CheckZoneLife(tf, breakBar, -1, futureTarget, demand.top);
+         // FIX: Pass true for immunity
+         datetime deathTime = CheckZoneLife(tf, breakBar, -1, futureTarget, demand.top, true);
          
          activeFlipSup = flip;
          if (deathTime == 0) {

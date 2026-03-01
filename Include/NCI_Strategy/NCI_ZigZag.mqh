@@ -6,31 +6,32 @@
 #include "NCI_Structs.mqh"
 #include "NCI_Helpers.mqh"
 
-// --- [FIXED] TREND CALCULATOR (AMNESIA BUG PATCHED) ---
+// --- [FIXED] TREND CALCULATOR (STOP SIGN ADDED TO PREVENT DOMINO EFFECT) ---
 void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &marketTrend, string suffix, bool &resolved[]) { 
    int count = ArraySize(points);
    if (count < 2) return; 
    int runningTrend = 0; 
-   double lastSupplyLevel = 0; int lastSupplyIdx = -1;
-   double lastDemandLevel = 0; int lastDemandIdx = -1; 
-   double prevHigh = 0; double prevLow = 0;
+
+   // --- THE PRIVATE NOTEBOOK (Clean SMC State Machine) ---
+   double activeBossSupply = 0; 
+   double activeBossDemand = 0; 
+   double internalHigh = 0; 
+   double internalLow = 999999; 
 
    // --- STATIC MEMORY CACHE ---
    static datetime tCacheTime_HTF[]; static int tCacheTrend_HTF[];
-   static double tCacheSL_HTF[]; static int tCacheSI_HTF[];
-   static double tCacheDL_HTF[]; static int tCacheDI_HTF[];
-   static double tCachePH_HTF[]; static double tCachePL_HTF[];
+   static double tCacheSL_HTF[]; static double tCacheDL_HTF[];
+   static double tCacheIH_HTF[]; static double tCacheIL_HTF[];
 
    static datetime tCacheTime_LTF[]; static int tCacheTrend_LTF[];
-   static double tCacheSL_LTF[]; static int tCacheSI_LTF[];
-   static double tCacheDL_LTF[]; static int tCacheDI_LTF[];
-   static double tCachePH_LTF[]; static double tCachePL_LTF[];
+   static double tCacheSL_LTF[]; static double tCacheDL_LTF[];
+   static double tCacheIH_LTF[]; static double tCacheIL_LTF[];
 
    for (int i = 1; i < count; i++) { 
       PointStruct p = points[i];
       PointStruct prev = points[i-1]; 
 
-      // 1. CHECK THE MEMORY CACHE (ONLY IF THE POINT IS FULLY RESOLVED BY SMC!)
+      // 1. CHECK THE MEMORY CACHE
       bool useCache = false;
       if (resolved[i]) { 
          int cacheSize = (suffix == "_HTF") ? ArraySize(tCacheTime_HTF) : ArraySize(tCacheTime_LTF);
@@ -40,14 +41,12 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
                useCache = true;
                if (suffix == "_HTF") {
                   runningTrend = tCacheTrend_HTF[c];
-                  lastSupplyLevel = tCacheSL_HTF[c]; lastSupplyIdx = tCacheSI_HTF[c];
-                  lastDemandLevel = tCacheDL_HTF[c]; lastDemandIdx = tCacheDI_HTF[c];
-                  prevHigh = tCachePH_HTF[c]; prevLow = tCachePL_HTF[c];
+                  activeBossSupply = tCacheSL_HTF[c]; activeBossDemand = tCacheDL_HTF[c];
+                  internalHigh = tCacheIH_HTF[c]; internalLow = tCacheIL_HTF[c];
                } else {
                   runningTrend = tCacheTrend_LTF[c];
-                  lastSupplyLevel = tCacheSL_LTF[c]; lastSupplyIdx = tCacheSI_LTF[c];
-                  lastDemandLevel = tCacheDL_LTF[c]; lastDemandIdx = tCacheDI_LTF[c];
-                  prevHigh = tCachePH_LTF[c]; prevLow = tCachePL_LTF[c];
+                  activeBossSupply = tCacheSL_LTF[c]; activeBossDemand = tCacheDL_LTF[c];
+                  internalHigh = tCacheIH_LTF[c]; internalLow = tCacheIL_LTF[c];
                }
                points[i].assignedTrend = runningTrend;
                break;
@@ -55,103 +54,98 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
          }
       }
 
-      if (useCache) continue; // IF CACHED, SKIP THE MATH!
+      if (useCache) continue; 
 
-      // 2. IF NOT CACHED, CALCULATE IT
-      if (prev.type == 1 && prev.zoneLimitTop > 0) { 
-          lastSupplyLevel = prev.zoneLimitTop; 
-          lastSupplyIdx = prev.barIndex; 
-          prevHigh = prev.price;
+      // 2. UPDATE THE PRIVATE NOTEBOOK WITH NEW BOSSES & INTERNAL STRUCTURE
+      if (prev.type == 1) { 
+          internalHigh = prev.price;
+          // Only true validated Bosses have a zoneLimitTop > 0
+          if (prev.zoneLimitTop > 0) activeBossSupply = prev.zoneLimitTop; 
       } 
-      if (prev.type == -1 && prev.zoneLimitBottom > 0) { 
-          lastDemandLevel = prev.zoneLimitBottom; 
-          lastDemandIdx = prev.barIndex;
-          prevLow = prev.price; 
+      if (prev.type == -1) { 
+          internalLow = prev.price;
+          // Only true validated Bosses have a zoneLimitBottom > 0
+          if (prev.zoneLimitBottom > 0) activeBossDemand = prev.zoneLimitBottom; 
       } 
       
-      bool brokenSupply = false;
-      bool brokenDemand = false; 
+      // 3. SCAN FOR BREAKOUTS IN THE CURRENT LEG
+      bool brokeSupplyBoss = false;
+      bool brokeDemandBoss = false; 
+      bool brokeInternalHigh = false;
+      bool brokeInternalLow = false;
       
-      if (lastSupplyIdx != -1 && lastSupplyLevel > 0) {
-         brokenSupply = CheckForBreakout(tf, lastSupplyIdx, p.barIndex, lastSupplyLevel, 1);
+      if (activeBossSupply > 0) {
+         brokeSupplyBoss = CheckForBreakout(tf, prev.barIndex, p.barIndex, activeBossSupply, 1);
       }
-      
-      if (lastDemandIdx != -1 && lastDemandLevel > 0) {
-         brokenDemand = CheckForBreakout(tf, lastDemandIdx, p.barIndex, lastDemandLevel, -1);
+      if (activeBossDemand > 0) {
+         brokeDemandBoss = CheckForBreakout(tf, prev.barIndex, p.barIndex, activeBossDemand, -1);
+      }
+      if (internalHigh > 0) {
+         brokeInternalHigh = CheckForBreakout(tf, prev.barIndex, p.barIndex, internalHigh, 1);
+      }
+      if (internalLow < 999999) {
+         brokeInternalLow = CheckForBreakout(tf, prev.barIndex, p.barIndex, internalLow, -1);
       }
 
-      // --- THE AMNESIA FIX: CUT THE CORD TO ANCIENT MEMORIES ---
-      if (runningTrend == -1) { 
-          if (brokenSupply) {
-              runningTrend = 0;
-              // Downtrend is dead. Erase the ancient Boss Demand memory so it doesn't falsely pull us back!
-              lastDemandLevel = 0; lastDemandIdx = -1; prevLow = 0; brokenDemand = false;
+      // 4. THE SMC STATE MACHINE (NINJA IMMUNE & DOMINO SAFE)
+      bool stateChanged = false; // THE STOP SIGN FLAG
+
+      if (runningTrend == 1) { 
+          if (brokeDemandBoss) {
+              runningTrend = 0; // Trend is Dead (Limbo) -> YELLOW
+              activeBossDemand = 0; // Erase the shattered Boss from notebook
+              stateChanged = true; // Raise the Stop Sign!
           }
       } 
-      else if (runningTrend == 1) { 
-          if (brokenDemand) {
-              runningTrend = 0;
-              // Uptrend is dead. Erase the ancient Boss Supply memory so it doesn't falsely pull us back!
-              lastSupplyLevel = 0; lastSupplyIdx = -1; prevHigh = 0; brokenSupply = false;
+      else if (runningTrend == -1) { 
+          if (brokeSupplyBoss) {
+              runningTrend = 0; // Trend is Dead (Limbo) -> YELLOW
+              activeBossSupply = 0; // Erase the shattered Boss from notebook
+              stateChanged = true; // Raise the Stop Sign!
           }
       } 
-      else { 
-         if (p.type == 1) { 
-             if (brokenSupply || (prevHigh != 0 && p.price > prevHigh)) { 
-                 if (!brokenDemand) {
-                     runningTrend = 1;
-                     // New Uptrend officially born! Clear old Demand memories.
-                     lastDemandLevel = 0; lastDemandIdx = -1; prevLow = 0;
-                 }
-             } 
-         } 
-         if (p.type == -1) { 
-             if (brokenDemand || (prevLow != 0 && p.price < prevLow)) { 
-                 if (!brokenSupply) {
-                     runningTrend = -1;
-                     // New Downtrend officially born! Clear old Supply memories.
-                     lastSupplyLevel = 0; lastSupplyIdx = -1; prevHigh = 0;
-                 }
-             } 
-         } 
-         // Fallback Overrides
-         if (runningTrend == 0) {
-             if (brokenSupply && p.type == 1 && prevHigh != 0 && p.price > prevHigh) {
-                 runningTrend = 1;
-                 lastDemandLevel = 0; lastDemandIdx = -1; prevLow = 0;
-             }
-             if (brokenDemand && p.type == -1 && prevLow != 0 && p.price < prevLow) {
-                 runningTrend = -1;
-                 lastSupplyLevel = 0; lastSupplyIdx = -1; prevHigh = 0;
-             }
-         }
+      else { // runningTrend == 0
+          if (brokeInternalHigh) { 
+              runningTrend = 1; // New Uptrend confirmed! -> GREEN
+              activeBossDemand = 0; // Clear opposing memory
+              stateChanged = true; // Raise the Stop Sign!
+          } 
+          else if (brokeInternalLow) { 
+              runningTrend = -1; // New Downtrend confirmed! -> RED
+              activeBossSupply = 0; // Clear opposing memory
+              stateChanged = true; // Raise the Stop Sign!
+          } 
       } 
+      
+      // 5. Fallback for massive single-leg direct reversals
+      // --- THE FIX: ONLY RUN FALLBACK IF THE STOP SIGN IS NOT RAISED ---
+      if (!stateChanged && runningTrend == 0) {
+          if (brokeSupplyBoss) { runningTrend = 1; activeBossDemand = 0; }
+          else if (brokeDemandBoss) { runningTrend = -1; activeBossSupply = 0; }
+      }
+
       points[i].assignedTrend = runningTrend; 
 
-      // 3. SAVE TO MEMORY CACHE (ONLY IF THE POINT IS FULLY RESOLVED BY SMC!)
+      // 6. SAVE TO MEMORY CACHE
       if (resolved[i]) {
          if (suffix == "_HTF") {
             int s = ArraySize(tCacheTime_HTF);
             ArrayResize(tCacheTime_HTF, s + 1); ArrayResize(tCacheTrend_HTF, s + 1);
-            ArrayResize(tCacheSL_HTF, s + 1); ArrayResize(tCacheSI_HTF, s + 1);
-            ArrayResize(tCacheDL_HTF, s + 1); ArrayResize(tCacheDI_HTF, s + 1);
-            ArrayResize(tCachePH_HTF, s + 1); ArrayResize(tCachePL_HTF, s + 1);
+            ArrayResize(tCacheSL_HTF, s + 1); ArrayResize(tCacheDL_HTF, s + 1);
+            ArrayResize(tCacheIH_HTF, s + 1); ArrayResize(tCacheIL_HTF, s + 1);
 
             tCacheTime_HTF[s] = p.time; tCacheTrend_HTF[s] = runningTrend;
-            tCacheSL_HTF[s] = lastSupplyLevel; tCacheSI_HTF[s] = lastSupplyIdx;
-            tCacheDL_HTF[s] = lastDemandLevel; tCacheDI_HTF[s] = lastDemandIdx;
-            tCachePH_HTF[s] = prevHigh; tCachePL_HTF[s] = prevLow;
+            tCacheSL_HTF[s] = activeBossSupply; tCacheDL_HTF[s] = activeBossDemand;
+            tCacheIH_HTF[s] = internalHigh; tCacheIL_HTF[s] = internalLow;
          } else {
             int s = ArraySize(tCacheTime_LTF);
             ArrayResize(tCacheTime_LTF, s + 1); ArrayResize(tCacheTrend_LTF, s + 1);
-            ArrayResize(tCacheSL_LTF, s + 1); ArrayResize(tCacheSI_LTF, s + 1);
-            ArrayResize(tCacheDL_LTF, s + 1); ArrayResize(tCacheDI_LTF, s + 1);
-            ArrayResize(tCachePH_LTF, s + 1); ArrayResize(tCachePL_LTF, s + 1);
+            ArrayResize(tCacheSL_LTF, s + 1); ArrayResize(tCacheDL_LTF, s + 1);
+            ArrayResize(tCacheIH_LTF, s + 1); ArrayResize(tCacheIL_LTF, s + 1);
 
             tCacheTime_LTF[s] = p.time; tCacheTrend_LTF[s] = runningTrend;
-            tCacheSL_LTF[s] = lastSupplyLevel; tCacheSI_LTF[s] = lastSupplyIdx;
-            tCacheDL_LTF[s] = lastDemandLevel; tCacheDI_LTF[s] = lastDemandIdx;
-            tCachePH_LTF[s] = prevHigh; tCachePL_LTF[s] = prevLow;
+            tCacheSL_LTF[s] = activeBossSupply; tCacheDL_LTF[s] = activeBossDemand;
+            tCacheIH_LTF[s] = internalHigh; tCacheIL_LTF[s] = internalLow;
          }
       }
    } 
@@ -422,7 +416,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                        }
 
                        if (t_break > 0 || t_fail > 0) {
-                           isResolved = true; // ZONE HAS OFFICIALLY WON OR DIED!
+                           isResolved = true; 
                            
                            if (suffix == "_HTF") {
                                int s = ArraySize(cacheTime_HTF);
@@ -449,7 +443,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                    targetPoints[i].zoneLimitBottom = 0;
                    if (targetPoints[i].price < extremeLow) extremeLow = targetPoints[i].price;
                }
-               
+
                resolvedPoints[i] = isResolved; // Lock the handshake
            }
            else if (targetPoints[i].type == 1) { // PENDING SUPPLY (Ceiling)
@@ -471,7 +465,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                        }
 
                        if (t_break > 0 || t_fail > 0) {
-                           isResolved = true; // ZONE HAS OFFICIALLY WON OR DIED!
+                           isResolved = true; 
 
                            if (suffix == "_HTF") {
                                int s = ArraySize(cacheTime_HTF);
