@@ -41,6 +41,8 @@ input bool Enable_ZiZ_Mode        = true;  // If TRUE, IGNORES Sector A
 input bool ZiZ_AllowTrend         = true;  // Trade LTF Trend Zone inside HTF Zone (Swings)
 input bool ZiZ_AllowStairStep     = true;  // Trade LTF Zones ALIGNED with Trend (Steps)
 input bool ZiZ_AllowBreakout      = false; // Trade LTF Breakout Zone inside HTF Zone
+input bool UseToxicFilter         = false; // Block counter-trend scalps (ZiZ Only)
+input bool ZiZ_BlockStepSell      = true;  // Block bear market step-sells (ZiZ Only)
 
 // ==============================================================================
 // GROUP 2: ENTRY LOGIC (The Gas Pedal - Trade More)
@@ -51,10 +53,10 @@ input double RiskPercent          = 1.0;
 input ENUM_REENTRY_MODE EntryMode = MODE_DOUBLE;
 
 input group "Entry & Confirmation Logic"
-input bool                 Enable_Phoenix_Sweep = true; // Recover burned zones after 1H liquidity sweep
+input bool                 Enable_Phoenix_Sweep = true;  // Recover burned zones after 1H liquidity sweep
 input ENUM_ENTRY_STYLE     EntryStyle         = STYLE_CONFIRMATION;
 input ENUM_CONFIRM_PATTERN ConfirmationSignal = PATTERN_ANY;
-input double               MinWickPercent     = 0.60; // Wick must be >= 60% of candle for Pinbar
+input double               MinWickPercent     = 0.60;    // Wick must be >= 60% of candle for Pinbar
 input double ReferenceZonePips_HTF = 235.0; // Reference size for H1
 input double ReferenceZonePips_LTF = 60.0;  // Reference size for M15
 input double BaseEntryDepth        = 0.40;  // Zone Arming/Entry Line
@@ -112,15 +114,11 @@ input bool   UseTimeFilter = true; // Enable Session Filtering
 input int    StartHour     = 7;    // Start Trading (Server Time)
 input int    EndHour       = 16;   // Stop Entering New Trades (Server Time)
 
-input group "Strategy Restrictors"
-input bool UseToxicFilter         = false; // Block counter-trend scalps
-input bool ZiZ_BlockStepSell      = true;  // Block bear market step-sells
-
 input group "Structure Rules"
-input bool   Use_Strict_SMC_Zones = true;  // [NEW] TRUE = SMC Breakout Logic | FALSE = Old Draw-All Logic
-input double MinBodyPercent = 0.50;  
+input bool   Use_Strict_SMC_Zones = true; // [NEW] TRUE = SMC Breakout Logic | FALSE = Old Draw-All Logic
+input double MinBodyPercent = 0.50;
 input int MaxScanDistance   = 3;
-input double BigCandleFactor = 1.3; 
+input double BigCandleFactor = 1.3;
 
 input group "Spread & Candle Filters"
 input bool   UseVolatilityGuard = true;
