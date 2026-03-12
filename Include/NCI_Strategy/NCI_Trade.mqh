@@ -101,7 +101,6 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
    double lotSize = NormalizeDouble(riskAmount / (riskPoints * tickValue), 2);
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   
    if (lotSize < minLot) lotSize = minLot;
    if (lotSize > maxLot) lotSize = maxLot;
    
@@ -138,6 +137,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
 
    datetime relevantTime = entryZone.startTime;
    int currentTradeCount = 0;
+   
    if (type == 1) { // BUY
        if (relevantTime != CurrentBuyZoneID) {
            CurrentBuyZoneID = relevantTime;
@@ -221,6 +221,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceLimit = entryZone.top - (zoneHeightPrice * dynamicMaxPct);   
       
       bool signalFired = false;
+      
       if (EntryStyle == STYLE_BLIND_TOUCH) {
           if (ask <= entryPriceStart && ask >= entryPriceLimit) signalFired = true;
       } 
@@ -241,7 +242,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          // --- [NEW] TP OPEN SKY FALLBACK ---
          if (opposingSupply.bottom > 0 && opposingSupply.bottom > ask) {
-             tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth); 
+             tp = opposingSupply.bottom + ((opposingSupply.top - opposingSupply.bottom) * TPZoneDepth);
          }
          
          double reward = (tp > 0) ? (tp - ask) : 0;
@@ -253,7 +254,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          // Final recalculation before sending to broker
          reward = tp - ask;
-         
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : ""; 
             bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
@@ -268,6 +268,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceLimit = entryZone.bottom + (zoneHeightPrice * dynamicMaxPct);   
       
       bool signalFired = false;
+      
       if (EntryStyle == STYLE_BLIND_TOUCH) {
           if (bid >= entryPriceStart && bid <= entryPriceLimit) signalFired = true;
       } 
@@ -300,7 +301,6 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          // Final recalculation before sending to broker
          reward = bid - tp;
-         
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : "";
             bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
@@ -331,6 +331,7 @@ void CheckTradeEntry()
    if (PositionsTotal() >= MaxOpenTrades) return;
    
    if (!AllowTrading) return;
+   
    if (MinMinutesBetweenTrades > 0 && GlobalLastTradeTime > 0) {
        if (TimeCurrent() - GlobalLastTradeTime < (MinMinutesBetweenTrades * 60)) {
            return;
@@ -338,6 +339,7 @@ void CheckTradeEntry()
    }
 
    double currentADR = CalculateADR(ADR_Period);
+   
    if (Use_ADR_Filter) {
 
        if (currentADR < SectorC_Max_ADR) {
@@ -449,11 +451,13 @@ void CheckTradeEntry()
       if (Simple_Trade_LTF) { 
           bool allowBuys = true;
           bool allowSells = true;
+          
           if (Simple_UseTrendAlign) {
               if (currentMarketTrend_HTF == 1) { allowBuys = true; allowSells = false; } 
               else if (currentMarketTrend_HTF == -1) { allowBuys = false; allowSells = true; } 
               else { allowBuys = false; allowSells = false; }
           }
+          
           if (Simple_Trend_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
              if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
              else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "LTF", ReferenceZonePips_LTF);
@@ -474,6 +478,7 @@ void ManageOpenPositions() {
    datetime currentTime = TimeCurrent();
    MqlDateTime tm;
    TimeToStruct(currentTime, tm);
+   
    bool isFridayCloseTime = (Enable_Friday_Close && tm.day_of_week == 5 && tm.hour >= Friday_Close_Hour);
    
    for(int i = PositionsTotal() - 1; i >= 0; i--) { 
@@ -514,7 +519,7 @@ void ManageOpenPositions() {
 
       // --- [NEW] SMART TRAIL GHOST GUARD ---
       if (Enable_Smart_Trail && isH1Target) {
-         if (type == POSITION_TYPE_BUY && activeDemand_LTF.isActive && activeDemand_LTF.bottom > 0) { // GUARDRAIL ADDED
+         if (type == POSITION_TYPE_BUY && activeDemand_LTF.isActive && activeDemand_LTF.bottom > 0) { 
              double proposedSL = activeDemand_LTF.bottom - (Smart_Trail_Buffer_Pips * point);
              if (proposedSL > currentSL + point) {
                  if (activeFlippedSupply_LTF.isActive) {
@@ -524,7 +529,7 @@ void ManageOpenPositions() {
                  }
              }
          }
-         else if (type == POSITION_TYPE_SELL && activeSupply_LTF.isActive && activeSupply_LTF.top > 0) { // GUARDRAIL ADDED
+         else if (type == POSITION_TYPE_SELL && activeSupply_LTF.isActive && activeSupply_LTF.top > 0) { 
              double proposedSL = activeSupply_LTF.top + (Smart_Trail_Buffer_Pips * point);
              if (proposedSL < currentSL - point) {
                  if (activeFlippedDemand_LTF.isActive) {
@@ -683,6 +688,7 @@ void ExportTransactionsToCSV()
    if(file_handle != INVALID_HANDLE)
    {
       FileWrite(file_handle, "Time", "Ticket", "Type", "Lots", "Price", "RawProfit", "Commission", "Swap", "NetProfit", "ADR", "Strategy", "Comment", "H1 Trend", "M15 Trend");
+      
       HistorySelect(0, TimeCurrent());
       int total_deals = HistoryDealsTotal();
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -697,12 +703,16 @@ void ExportTransactionsToCSV()
             string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
             
+            // --- [FIXED] CSV STRATEGY TAGGING LOGIC ---
             string strategyType = "OTHER";
-            if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
+            if (StringFind(rawComment, "Brk HTF") >= 0) strategyType = "HTF-BREAKOUT";
+            else if (StringFind(rawComment, "Brk LTF") >= 0) strategyType = "LTF-BREAKOUT";
+            else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT"; // Catch-all for ZiZ Brk
+            else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
+            else if (StringFind(rawComment, "LTF") >= 0) strategyType = "LTF-SIMPLE";
+            else if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
             else if (StringFind(rawComment, "Swing") >= 0) strategyType = "SWING";
             else if (StringFind(rawComment, "Scalp") >= 0) strategyType = "SCALP";
-            else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
-            else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT";
             else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; 
             else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE";
             
