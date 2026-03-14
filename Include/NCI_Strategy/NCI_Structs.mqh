@@ -13,6 +13,11 @@ struct PointStruct {
    double zoneLimitTop;
    double zoneLimitBottom;
    int assignedTrend; 
+   
+   // --- [NEW] FVG MEMORY SLOTS ---
+   bool hasFVG;
+   double fvgTop;
+   double fvgBottom;
 };
 
 struct MergedZoneState {
@@ -33,6 +38,8 @@ MergedZoneState activeSupply_HTF;
 MergedZoneState activeDemand_HTF;
 MergedZoneState activeFlippedSupply_HTF; 
 MergedZoneState activeFlippedDemand_HTF; 
+MergedZoneState activeFVGSupply_HTF;     // [NEW] HTF Bearish FVG Zone
+MergedZoneState activeFVGDemand_HTF;     // [NEW] HTF Bullish FVG Zone
 int currentMarketTrend_HTF = 0;
 
 PointStruct ZigZagPoints_LTF[];
@@ -40,6 +47,8 @@ MergedZoneState activeSupply_LTF;
 MergedZoneState activeDemand_LTF;
 MergedZoneState activeFlippedSupply_LTF; 
 MergedZoneState activeFlippedDemand_LTF; 
+MergedZoneState activeFVGSupply_LTF;     // [NEW] LTF Bearish FVG Zone
+MergedZoneState activeFVGDemand_LTF;     // [NEW] LTF Bullish FVG Zone
 int currentMarketTrend_LTF = 0;
 
 // ==========================================
@@ -49,15 +58,14 @@ int currentMarketTrend_LTF = 0;
 // --- BUY MEMORY ---
 ulong CurrentOpenBuyTicket = 0;
 datetime CurrentBuyZoneID = 0;
+bool BuyZoneIsBurned = false; 
 int CurrentBuyZoneTradeCount = 0;
-bool BuyZoneIsBurned = false;
 
 // --- SELL MEMORY ---
 ulong CurrentOpenSellTicket = 0;
 datetime CurrentSellZoneID = 0;
+bool SellZoneIsBurned = false; 
 int CurrentSellZoneTradeCount = 0;
-bool SellZoneIsBurned = false;
-
 // *** DASHBOARD VISIBILITY FLAGS ***
 bool ShowHTF = true;
 bool ShowLTF = true;

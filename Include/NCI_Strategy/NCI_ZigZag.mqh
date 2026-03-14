@@ -31,7 +31,6 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
       PointStruct p = points[i];
       PointStruct prev = points[i-1]; 
 
-      // 1. CHECK THE MEMORY CACHE
       bool useCache = false;
       if (resolved[i]) { 
          int cacheSize = (suffix == "_HTF") ? ArraySize(tCacheTime_HTF) : ArraySize(tCacheTime_LTF);
@@ -56,19 +55,15 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
 
       if (useCache) continue; 
 
-      // 2. UPDATE THE PRIVATE NOTEBOOK WITH NEW BOSSES & INTERNAL STRUCTURE
       if (prev.type == 1) { 
           internalHigh = prev.price;
-          // Only true validated Bosses have a zoneLimitTop > 0
           if (prev.zoneLimitTop > 0) activeBossSupply = prev.zoneLimitTop; 
       } 
       if (prev.type == -1) { 
           internalLow = prev.price;
-          // Only true validated Bosses have a zoneLimitBottom > 0
           if (prev.zoneLimitBottom > 0) activeBossDemand = prev.zoneLimitBottom; 
       } 
       
-      // 3. SCAN FOR BREAKOUTS IN THE CURRENT LEG
       bool brokeSupplyBoss = false;
       bool brokeDemandBoss = false; 
       bool brokeInternalHigh = false;
@@ -87,38 +82,35 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
          brokeInternalLow = CheckForBreakout(tf, prev.barIndex, p.barIndex, internalLow, -1);
       }
 
-      // 4. THE SMC STATE MACHINE (NINJA IMMUNE & DOMINO SAFE)
-      bool stateChanged = false; // THE STOP SIGN FLAG
+      bool stateChanged = false;
 
       if (runningTrend == 1) { 
           if (brokeDemandBoss) {
-              runningTrend = 0; // Trend is Dead (Limbo) -> YELLOW
-              activeBossDemand = 0; // Erase the shattered Boss from notebook
-              stateChanged = true; // Raise the Stop Sign!
+              runningTrend = 0; 
+              activeBossDemand = 0; 
+              stateChanged = true; 
           }
       } 
       else if (runningTrend == -1) { 
           if (brokeSupplyBoss) {
-              runningTrend = 0; // Trend is Dead (Limbo) -> YELLOW
-              activeBossSupply = 0; // Erase the shattered Boss from notebook
-              stateChanged = true; // Raise the Stop Sign!
+              runningTrend = 0; 
+              activeBossSupply = 0; 
+              stateChanged = true; 
           }
       } 
-      else { // runningTrend == 0
+      else { 
           if (brokeInternalHigh) { 
-              runningTrend = 1; // New Uptrend confirmed! -> GREEN
-              activeBossDemand = 0; // Clear opposing memory
-              stateChanged = true; // Raise the Stop Sign!
+              runningTrend = 1; 
+              activeBossDemand = 0; 
+              stateChanged = true; 
           } 
           else if (brokeInternalLow) { 
-              runningTrend = -1; // New Downtrend confirmed! -> RED
-              activeBossSupply = 0; // Clear opposing memory
-              stateChanged = true; // Raise the Stop Sign!
+              runningTrend = -1; 
+              activeBossSupply = 0; 
+              stateChanged = true; 
           } 
       } 
       
-      // 5. Fallback for massive single-leg direct reversals
-      // --- THE FIX: ONLY RUN FALLBACK IF THE STOP SIGN IS NOT RAISED ---
       if (!stateChanged && runningTrend == 0) {
           if (brokeSupplyBoss) { runningTrend = 1; activeBossDemand = 0; }
           else if (brokeDemandBoss) { runningTrend = -1; activeBossSupply = 0; }
@@ -126,7 +118,6 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
 
       points[i].assignedTrend = runningTrend; 
 
-      // 6. SAVE TO MEMORY CACHE
       if (resolved[i]) {
          if (suffix == "_HTF") {
             int s = ArraySize(tCacheTime_HTF);
@@ -152,13 +143,19 @@ void CalculateTrendsAndLock(ENUM_TIMEFRAMES tf, PointStruct &points[], int &mark
    marketTrend = runningTrend;
 }
 
-// [Keep CalculateZoneLimits ... unchanged]
+// --- [UPDATED] INDEPENDENT FVG MEMORY INJECTION ---
 void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) { 
    p.zoneLimitTop = p.price; 
    p.zoneLimitBottom = p.price;
+   
+   // Initialize new FVG memory slots
+   p.hasFVG = false;
+   p.fvgTop = 0;
+   p.fvgBottom = 0;
+   
    int bars = Bars(_Symbol, tf);
 
-   if (p.type == 1) { 
+   if (p.type == 1) { // DEMAND (Green)
       int gI=-1, rI=-1;
       for(int k=0;k<=5;k++){ 
          if(p.barIndex+k >= bars) break;
@@ -173,8 +170,24 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
                if(IsBigCandle(tf, rI)) p.zoneLimitBottom=(GetOpen(tf, rI)+GetClose(tf, rI))/2.0; 
             } else p.zoneLimitBottom=(GetOpen(tf, gI)+GetClose(tf, gI))/2.0;
          } 
+         
+         // --- FVG MEMORY INJECTION (DEMAND) ---
+         if (Enable_FVG_Zones) {
+             for (int i = gI - 1; i >= MathMax(0, gI - FVG_Max_Scan_Bars); i--) {
+                 if (i - 1 < 0) break;
+                 double low_current = GetLow(tf, i - 1);  // Candle 3 Low (Top of the gap)
+                 double high_prev = GetHigh(tf, i + 1);   // Candle 1 High (Bottom of the gap)
+                 
+                 if (low_current > high_prev) { // Bullish FVG Found!
+                     p.hasFVG = true;
+                     p.fvgTop = low_current;    
+                     p.fvgBottom = high_prev;   
+                     break; 
+                 }
+             }
+         }
       } 
-   } else { 
+   } else { // SUPPLY (Red)
       int rI=-1, gI=-1;
       for(int k=0;k<=5;k++){ 
          if(p.barIndex+k >= bars) break;
@@ -189,6 +202,22 @@ void CalculateZoneLimits(ENUM_TIMEFRAMES tf, PointStruct &p) {
                if(IsBigCandle(tf, gI)) p.zoneLimitTop=(GetOpen(tf, gI)+GetClose(tf, gI))/2.0; 
             } else p.zoneLimitTop=(GetOpen(tf, rI)+GetClose(tf, rI))/2.0;
          } 
+         
+         // --- FVG MEMORY INJECTION (SUPPLY) ---
+         if (Enable_FVG_Zones) {
+             for (int i = rI - 1; i >= MathMax(0, rI - FVG_Max_Scan_Bars); i--) {
+                 if (i - 1 < 0) break;
+                 double high_current = GetHigh(tf, i - 1); // Candle 3 High (Bottom of the gap)
+                 double low_prev = GetLow(tf, i + 1);      // Candle 1 Low (Top of the gap)
+                 
+                 if (high_current < low_prev) { // Bearish FVG Found!
+                     p.hasFVG = true;
+                     p.fvgTop = low_prev;       
+                     p.fvgBottom = high_current;
+                     break; 
+                 }
+             }
+         }
       } 
    } 
 }
@@ -354,17 +383,15 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
    static datetime cacheTime_HTF[]; static int cacheStatus_HTF[];
    static datetime cacheTime_LTF[]; static int cacheStatus_LTF[];
 
-   // --- THE RESOLVED FLAG ARRAY ---
    bool resolvedPoints[];
    int ptsCount = ArraySize(targetPoints);
    ArrayResize(resolvedPoints, ptsCount);
    for(int i=0; i<ptsCount; i++) resolvedPoints[i] = true; 
 
    // =========================================================
-   // THE TOGGLE SWITCH: Strict SMC Logic
+   // TOGGLE: USE RETAIL ZONES VS STRICT SMC ZONES
    // =========================================================
    if (Use_Strict_SMC_Zones) {
-
        double activeMacroSupply = 0;
        double activeMacroDemand = 0;
        double extremeHigh = 0;
@@ -397,7 +424,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
                }
            }
 
-           if (targetPoints[i].type == -1) { // PENDING DEMAND (Floor)
+           if (targetPoints[i].type == -1) { 
                double targetToBreak = (activeMacroSupply > 0) ? activeMacroSupply : extremeHigh;
                
                if (targetToBreak > 0) {
@@ -446,7 +473,7 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
 
                resolvedPoints[i] = isResolved; // Lock the handshake
            }
-           else if (targetPoints[i].type == 1) { // PENDING SUPPLY (Ceiling)
+           else if (targetPoints[i].type == 1) { 
                double targetToBreak = (activeMacroDemand > 0) ? activeMacroDemand : extremeLow;
                
                if (targetToBreak > 0 && targetToBreak != 999999) {
