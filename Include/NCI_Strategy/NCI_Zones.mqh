@@ -113,15 +113,11 @@ void DrawFVGZone(string suffix, datetime t1, datetime t2, double top, double bot
    if(ObjectFind(0, name) < 0) {
       ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, (t2 == 0) ? TimeCurrent() : t2, bottom);
       ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
-      
-      // --- THE HOLLOW BOX UPDATE ---
-      ObjectSetInteger(0, name, OBJPROP_FILL, false); // No paint inside
-      ObjectSetInteger(0, name, OBJPROP_BACK, false); // Hollow border only
-      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);    // Thicker border for visibility
+      ObjectSetInteger(0, name, OBJPROP_FILL, false); 
+      ObjectSetInteger(0, name, OBJPROP_BACK, false); 
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);    
    } else {
       ObjectSetInteger(0, name, OBJPROP_TIME, 1, (t2 == 0) ? TimeCurrent() : t2);
-      
-      // Ensure existing FVG objects update to the hollow style if they were drawn previously
       ObjectSetInteger(0, name, OBJPROP_COLOR, c);
       ObjectSetInteger(0, name, OBJPROP_FILL, false); 
       ObjectSetInteger(0, name, OBJPROP_BACK, false); 
@@ -129,7 +125,6 @@ void DrawFVGZone(string suffix, datetime t1, datetime t2, double top, double bot
    }
 }
 
-// --- MAP ENGINE: NOW READS AND DRAWS INDEPENDENT FVG ZONES ---
 void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneState &activeSup, MergedZoneState &activeDem, MergedZoneState &activeFlipSup, MergedZoneState &activeFlipDem, string suffix) { 
    if (!MQLInfoInteger(MQL_OPTIMIZATION) && Show_Zone_Boxes) {
        ObjectsDeleteAll(0, "NCI_Zone_" + suffix);
@@ -146,7 +141,6 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    MergedZoneState supply; supply.isActive = false; 
    MergedZoneState demand; demand.isActive = false;
    
-   // --- Local Memory for FVGs ---
    MergedZoneState fvgSupply; fvgSupply.isActive = false;
    MergedZoneState fvgDemand; fvgDemand.isActive = false;
 
@@ -162,6 +156,17 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
          }
          else { 
             datetime preciseBreakTime = FindBreakoutTime(tf, supply.lastBarIndex, p.barIndex, supply.top, 1);
+            
+            // --- [NEW] INDEPENDENT FVG DEATH SCANNER (HISTORICAL) ---
+            if (fvgSupply.isActive) {
+                // Bearish FVG dies if price breaks ABOVE its top (Stop Loss side)
+                datetime fvgDeadTime = FindBreakoutTime(tf, supply.lastBarIndex, p.barIndex, fvgSupply.top, 1);
+                if (fvgDeadTime > 0) {
+                    DrawFVGZone(suffix, fvgSupply.startTime, fvgDeadTime, fvgSupply.top, fvgSupply.bottom, 1, i-1);
+                    fvgSupply.isActive = false; // Kill it!
+                }
+            }
+
             if (preciseBreakTime > 0) { 
                DrawSingleZone(suffix, supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1);
                if (fvgSupply.isActive) { DrawFVGZone(suffix, fvgSupply.startTime, preciseBreakTime, fvgSupply.top, fvgSupply.bottom, 1, i-1); fvgSupply.isActive = false; }
@@ -228,6 +233,17 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
          }
          else { 
             datetime preciseBreakTime = FindBreakoutTime(tf, demand.lastBarIndex, p.barIndex, demand.bottom, -1);
+            
+            // --- [NEW] INDEPENDENT FVG DEATH SCANNER (HISTORICAL) ---
+            if (fvgDemand.isActive) {
+                // Bullish FVG dies if price breaks BELOW its bottom (Stop Loss side)
+                datetime fvgDeadTime = FindBreakoutTime(tf, demand.lastBarIndex, p.barIndex, fvgDemand.bottom, -1);
+                if (fvgDeadTime > 0) {
+                    DrawFVGZone(suffix, fvgDemand.startTime, fvgDeadTime, fvgDemand.top, fvgDemand.bottom, -1, i-1);
+                    fvgDemand.isActive = false; // Kill it!
+                }
+            }
+
             if (preciseBreakTime > 0) { 
                DrawSingleZone(suffix, demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1);
                if (fvgDemand.isActive) { DrawFVGZone(suffix, fvgDemand.startTime, preciseBreakTime, fvgDemand.top, fvgDemand.bottom, -1, i-1); fvgDemand.isActive = false; }
@@ -290,6 +306,16 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    
    if (supply.isActive) {
       int startBar = iBarShift(_Symbol, tf, supply.startTime);
+      
+      // --- [NEW] INDEPENDENT FVG DEATH SCANNER (LIVE EDGE) ---
+      if (fvgSupply.isActive) {
+          datetime fvgDeadTime = FindBreakoutTime(tf, startBar, 0, fvgSupply.top, 1);
+          if (fvgDeadTime > 0) {
+              DrawFVGZone(suffix, fvgSupply.startTime, fvgDeadTime, fvgSupply.top, fvgSupply.bottom, 1, 999993);
+              fvgSupply.isActive = false; // Kill it!
+          }
+      }
+
       datetime deadTime = FindBreakoutTime(tf, startBar, 0, supply.top, 1);
       if(deadTime > 0) {
          DrawSingleZone(suffix, supply.startTime, deadTime, supply.top, supply.bottom, 1, 999991); 
@@ -330,6 +356,16 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    
    if (demand.isActive) {
       int startBar = iBarShift(_Symbol, tf, demand.startTime);
+      
+      // --- [NEW] INDEPENDENT FVG DEATH SCANNER (LIVE EDGE) ---
+      if (fvgDemand.isActive) {
+          datetime fvgDeadTime = FindBreakoutTime(tf, startBar, 0, fvgDemand.bottom, -1);
+          if (fvgDeadTime > 0) {
+              DrawFVGZone(suffix, fvgDemand.startTime, fvgDeadTime, fvgDemand.top, fvgDemand.bottom, -1, 999994);
+              fvgDemand.isActive = false; // Kill it!
+          }
+      }
+
       datetime deadTime = FindBreakoutTime(tf, startBar, 0, demand.bottom, -1);
       if(deadTime > 0) {
          DrawSingleZone(suffix, demand.startTime, deadTime, demand.top, demand.bottom, -1, 999992); 
@@ -371,11 +407,9 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    if (supply.isActive) DrawSingleZone(suffix, supply.startTime, TimeCurrent()+PeriodSeconds(tf)*50, supply.top, supply.bottom, 1, 999991);
    if (demand.isActive) DrawSingleZone(suffix, demand.startTime, TimeCurrent()+PeriodSeconds(tf)*50, demand.top, demand.bottom, -1, 999992); 
    
-   // --- DRAW AND SAVE ACTIVE FVGS ---
    if (fvgSupply.isActive) DrawFVGZone(suffix, fvgSupply.startTime, TimeCurrent()+PeriodSeconds(tf)*50, fvgSupply.top, fvgSupply.bottom, 1, 999993);
    if (fvgDemand.isActive) DrawFVGZone(suffix, fvgDemand.startTime, TimeCurrent()+PeriodSeconds(tf)*50, fvgDemand.top, fvgDemand.bottom, -1, 999994);
 
-   // --- INJECT INTO GLOBAL MEMORY FOR TRADE ENGINE ---
    if (suffix == "_HTF") {
        activeFVGSupply_HTF = fvgSupply;
        activeFVGDemand_HTF = fvgDemand;
