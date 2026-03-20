@@ -119,9 +119,9 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    if (entryZone.top <= 0 || entryZone.bottom <= 0 || entryZone.top <= entryZone.bottom) return false;
    if (slZone.top <= 0 || slZone.bottom <= 0) return false;
 
-   // --- [NEW] THE TWO BULLETS MEMORY FIX ---
    datetime relevantTime = entryZone.startTime;
-   if (StringFind(commentTag, "FVG") >= 0) relevantTime += 1; // Separate FVG burns from Extreme burns!
+   bool isFVG = (StringFind(commentTag, "FVG") >= 0); // Is this an FVG Bullet?
+   if (isFVG) relevantTime += 1; 
 
    int currentTradeCount = 0;
    if (type == 1) { // BUY
@@ -198,15 +198,24 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceLimit = entryZone.top - (zoneHeightPrice * dynamicMaxPct);   
       
       bool signalFired = false;
-      if (EntryStyle == STYLE_BLIND_TOUCH) {
+      
+      // --- THE HYBRID SNIPER UPDATE (BUY) ---
+      if (isFVG) {
+          // FVG Override: Always use Blind Touch instantly.
           if (ask <= entryPriceStart && ask >= entryPriceLimit) signalFired = true;
-      } 
-      else if (EntryStyle == STYLE_CONFIRMATION) {
-          if (CheckConfirmation(1, entryPriceStart, entryPriceLimit)) signalFired = true;
-      }
-      else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
-          if (ask <= entryZone.top && ask >= entryPriceLimit) {
-              if (currentMarketTrend_LTF == 1) signalFired = true;
+      } else {
+          // Normal Origin/Breaker Blocks
+          if (EntryStyle == STYLE_BLIND_TOUCH) {
+              if (ask <= entryPriceStart && ask >= entryPriceLimit) signalFired = true;
+          } 
+          else if (EntryStyle == STYLE_CONFIRMATION) {
+              if (CheckConfirmation(1, entryPriceStart, entryPriceLimit)) signalFired = true;
+          }
+          else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
+              // CEILING RESTORED: Must be safely inside the block!
+              if (ask <= entryZone.top && ask >= entryPriceLimit) { 
+                  if (currentMarketTrend_LTF == 1) signalFired = true;
+              }
           }
       }
       
@@ -239,15 +248,24 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
       double entryPriceLimit = entryZone.bottom + (zoneHeightPrice * dynamicMaxPct);   
       
       bool signalFired = false;
-      if (EntryStyle == STYLE_BLIND_TOUCH) {
+      
+      // --- THE HYBRID SNIPER UPDATE (SELL) ---
+      if (isFVG) {
+          // FVG Override: Always use Blind Touch instantly.
           if (bid >= entryPriceStart && bid <= entryPriceLimit) signalFired = true;
-      } 
-      else if (EntryStyle == STYLE_CONFIRMATION) {
-          if (CheckConfirmation(-1, entryPriceStart, entryPriceLimit)) signalFired = true;
-      }
-      else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
-          if (bid >= entryZone.bottom && bid <= entryPriceLimit) {
-              if (currentMarketTrend_LTF == -1) signalFired = true;
+      } else {
+          // Normal Origin/Breaker Blocks
+          if (EntryStyle == STYLE_BLIND_TOUCH) {
+              if (bid >= entryPriceStart && bid <= entryPriceLimit) signalFired = true;
+          } 
+          else if (EntryStyle == STYLE_CONFIRMATION) {
+              if (CheckConfirmation(-1, entryPriceStart, entryPriceLimit)) signalFired = true;
+          }
+          else if (EntryStyle == STYLE_STRUCTURAL_SHIFT) {
+              // FLOOR RESTORED: Must be safely inside the block!
+              if (bid >= entryZone.bottom && bid <= entryPriceLimit) { 
+                  if (currentMarketTrend_LTF == -1) signalFired = true;
+              }
           }
       }
       
@@ -350,7 +368,6 @@ void CheckTradeEntry()
 
    if (Enable_ZiZ_Mode) {
       if (ZiZ_AllowTrend) {
-         // --- [NEW] FVG BULLETS (Triggers first if hit) ---
          if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && IsOverlapping(activeFVGDemand_LTF, activeDemand_HTF)) {
              if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "FVG-Swing", ReferenceZonePips_LTF);
          }
@@ -358,7 +375,6 @@ void CheckTradeEntry()
              if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-Swing", ReferenceZonePips_LTF);
          }
 
-         // --- EXTREME BLOCK BULLETS (Backup/Main) ---
          if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
              if (currentMarketTrend_HTF == 1) {
                  bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
@@ -406,6 +422,14 @@ void CheckTradeEntry()
    if (Enable_Simple_Mode) {
       if (Simple_Trade_HTF) { 
           if (Simple_Trend_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
+             
+             if (Enable_FVG_Zones && activeFVGDemand_HTF.isActive && currentMarketTrend_HTF == 1) {
+                 ExecuteEntryLogic(activeFVGDemand_HTF, activeFVGDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "FVG-HTF", ReferenceZonePips_HTF);
+             }
+             if (Enable_FVG_Zones && activeFVGSupply_HTF.isActive && currentMarketTrend_HTF == -1) {
+                 ExecuteEntryLogic(activeFVGSupply_HTF, activeFVGSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "FVG-HTF", ReferenceZonePips_HTF);
+             }
+
              if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF", ReferenceZonePips_HTF);
              else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF", ReferenceZonePips_HTF);
           }
@@ -428,7 +452,6 @@ void CheckTradeEntry()
           }
           
           if (Simple_Trend_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
-             // --- [NEW] FVG BULLETS (LTF) ---
              if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && currentMarketTrend_LTF == 1 && allowBuys) {
                  ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "FVG-LTF", ReferenceZonePips_LTF);
              }
@@ -436,7 +459,6 @@ void CheckTradeEntry()
                  ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-LTF", ReferenceZonePips_LTF);
              }
              
-             // --- EXTREME BLOCK BULLETS ---
              if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
              else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "LTF", ReferenceZonePips_LTF);
           }
@@ -676,8 +698,9 @@ void ExportTransactionsToCSV()
             if (StringFind(rawComment, "Brk HTF") >= 0) strategyType = "HTF-BREAKOUT";
             else if (StringFind(rawComment, "Brk LTF") >= 0) strategyType = "LTF-BREAKOUT";
             else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT"; 
-            else if (StringFind(rawComment, "FVG-Swing") >= 0) strategyType = "FVG-SWING"; // [NEW] Track FVG
-            else if (StringFind(rawComment, "FVG-LTF") >= 0) strategyType = "FVG-SIMPLE";  // [NEW] Track FVG
+            else if (StringFind(rawComment, "FVG-Swing") >= 0) strategyType = "FVG-SWING"; 
+            else if (StringFind(rawComment, "FVG-LTF") >= 0) strategyType = "FVG-SIMPLE";  
+            else if (StringFind(rawComment, "FVG-HTF") >= 0) strategyType = "FVG-HTF"; 
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "LTF") >= 0) strategyType = "LTF-SIMPLE";
             else if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
