@@ -7,8 +7,20 @@
 #include "NCI_Helpers.mqh" 
 
 datetime GlobalLastTradeTime = 0; 
-datetime LastPhoenixBuyTime  = 0;
-datetime LastPhoenixSellTime = 0; 
+
+// --- NEW MEMORY ARCHITECTURE (20 SLOTS) ---
+datetime MemBuyZoneID[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+bool MemBuyZoneIsBurned[20] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
+int MemBuyZoneTradeCount[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+ulong MemOpenBuyTicket[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+datetime LastPhoenixBuyTime[20]  = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
+datetime MemSellZoneID[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+bool MemSellZoneIsBurned[20] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
+int MemSellZoneTradeCount[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+ulong MemOpenSellTicket[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+datetime LastPhoenixSellTime[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; 
+// -----------------------------------------
 
 bool IsOverlapping(MergedZoneState &z1, MergedZoneState &z2) {
    if (!z1.isActive || !z2.isActive) return false;
@@ -78,7 +90,7 @@ bool CheckConfirmation(int type, double zoneStart, double zoneLimit) {
    return false;
 }
 
-bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent)
+bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string comment, double finalRiskPercent, int slot)
 {
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double riskAmount = balance * (finalRiskPercent / 100.0); 
@@ -98,11 +110,11 @@ bool OpenTrade(ENUM_ORDER_TYPE type, double price, double sl, double tp, string 
       
       GlobalLastTradeTime = TimeCurrent();
       if (type == ORDER_TYPE_BUY) {
-          CurrentOpenBuyTicket = ticket;
-          CurrentBuyZoneTradeCount++;
+          MemOpenBuyTicket[slot] = ticket;
+          MemBuyZoneTradeCount[slot]++;
       } else {
-          CurrentOpenSellTicket = ticket;
-          CurrentSellZoneTradeCount++;
+          MemOpenSellTicket[slot] = ticket;
+          MemSellZoneTradeCount[slot]++;
       }
       
       Print(">>> TRADE OPENED | Ticket: ", ticket, 
@@ -123,23 +135,41 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    bool isFVG = (StringFind(commentTag, "FVG") >= 0); 
    if (isFVG) relevantTime += 1; 
 
+   // --- MEMORY SLOT MAPPING (ABSOLUTE ISOLATION) ---
+   int slot = 0;
+   if (commentTag == "HTF") slot = isBreakout ? 1 : 0;
+   else if (commentTag == "LTF") slot = isBreakout ? 4 : 3;
+   else if (commentTag == "FVG-HTF") slot = 2;
+   else if (commentTag == "FVG-LTF") slot = 5;
+   else if (commentTag == "ZiZ-Swing") slot = 6;
+   else if (StringFind(commentTag, "ZiZ-Scalp") >= 0) slot = 7;
+   else if (commentTag == "ZiZ-Step") slot = 8;
+   else if (commentTag == "ZiZ-Brk") slot = 9;
+   else if (commentTag == "FVG-Swing") slot = 10;
+   else if (commentTag == "Storm-Swing") slot = 11;
+   else if (commentTag == "Storm-Scalp") slot = 12;
+   else if (commentTag == "Storm-Step") slot = 13;
+   else if (commentTag == "Range-Fade") slot = 14;
+   else slot = 19; // Default fallback
+   // ------------------------------------------------
+
    int currentTradeCount = 0;
    if (type == 1) { // BUY
-       if (relevantTime != CurrentBuyZoneID) {
-           CurrentBuyZoneID = relevantTime;
-           BuyZoneIsBurned = false;        
-           CurrentBuyZoneTradeCount = 0;
+       if (relevantTime != MemBuyZoneID[slot]) {
+           MemBuyZoneID[slot] = relevantTime;
+           MemBuyZoneIsBurned[slot] = false;        
+           MemBuyZoneTradeCount[slot] = 0;
        }
-       if (BuyZoneIsBurned) return false;
-       currentTradeCount = CurrentBuyZoneTradeCount;
+       if (MemBuyZoneIsBurned[slot]) return false;
+       currentTradeCount = MemBuyZoneTradeCount[slot];
    } else if (type == -1) { // SELL
-       if (relevantTime != CurrentSellZoneID) {
-           CurrentSellZoneID = relevantTime;
-           SellZoneIsBurned = false;        
-           CurrentSellZoneTradeCount = 0;
+       if (relevantTime != MemSellZoneID[slot]) {
+           MemSellZoneID[slot] = relevantTime;
+           MemSellZoneIsBurned[slot] = false;        
+           MemSellZoneTradeCount[slot] = 0;
        }
-       if (SellZoneIsBurned) return false;
-       currentTradeCount = CurrentSellZoneTradeCount;
+       if (MemSellZoneIsBurned[slot]) return false;
+       currentTradeCount = MemSellZoneTradeCount[slot];
    }
 
    long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -232,7 +262,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          reward = tp - ask;
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : ""; 
-            bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk);
+            bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk, slot);
             if (res && Debug_Show_Spread) Print(">>> SUCCESS: Buy Entry Sent.");
             return res;
          }
@@ -278,7 +308,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          reward = bid - tp;
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
             string prefix = isBreakout ? "Brk " : "";
-            bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk);
+            bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk, slot);
             if (res && Debug_Show_Spread) Print(">>> SUCCESS: Sell Entry Sent.");
             return res;
          }
@@ -401,13 +431,10 @@ void CheckTradeEntry()
       }
       
       if (ZiZ_AllowBreakout) {
-         // --- FIXED REVERSED LOGIC FOR ZIZ BREAKOUT ---
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-             // Demand Flipped -> Now Resistance -> SELL (-1)
              ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
          if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-             // Supply Flipped -> Now Support -> BUY (1)
              ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_HTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
       }
@@ -429,13 +456,10 @@ void CheckTradeEntry()
              else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF", ReferenceZonePips_HTF);
           }
           if (Simple_Breakout_HTF) { 
-             // --- FIXED REVERSED LOGIC FOR HTF BREAKOUT ---
              if (activeFlippedSupply_HTF.isActive && activeSupply_HTF.isActive && activeFlippedSupply_HTF.endTime == 0) 
-                // Supply Flipped -> Support -> BUY (1)
                 ExecuteEntryLogic(activeFlippedSupply_HTF, activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF", ReferenceZonePips_HTF);
              
              if (activeFlippedDemand_HTF.isActive && activeDemand_HTF.isActive && activeFlippedDemand_HTF.endTime == 0) 
-                // Demand Flipped -> Resistance -> SELL (-1)
                 ExecuteEntryLogic(activeFlippedDemand_HTF, activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF", ReferenceZonePips_HTF);
           }
       }
@@ -462,13 +486,10 @@ void CheckTradeEntry()
              else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "LTF", ReferenceZonePips_LTF);
           }
           if (Simple_Breakout_LTF) { 
-             // --- FIXED REVERSED LOGIC FOR LTF BREAKOUT ---
              if (activeFlippedSupply_LTF.isActive && activeSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-                // Supply Flipped -> Support -> BUY (1)
                 if (allowBuys) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "LTF", ReferenceZonePips_LTF);
              }
              if (activeFlippedDemand_LTF.isActive && activeDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-                // Demand Flipped -> Resistance -> SELL (-1)
                 if (allowSells) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF);
              }
           }
@@ -604,71 +625,73 @@ void ManageOpenPositions() {
 }
 
 void ManageTradeState() { 
-   if (CurrentOpenBuyTicket != 0 && !PositionSelectByTicket(CurrentOpenBuyTicket)) { 
-      if (HistorySelectByPosition((long)CurrentOpenBuyTicket)) { 
-         double totalProfit = 0;
-         int deals = HistoryDealsTotal(); 
-         for(int i = 0; i < deals; i++) { 
-            ulong ticket = HistoryDealGetTicket(i);
-            totalProfit += (HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION));
-         } 
-         if (totalProfit < 0) { 
-            Print(">>> BUY Trade LOSS. Buy Zone BURNED.");
-            BuyZoneIsBurned = true; 
-         } else { 
-            Print(">>> BUY Trade WIN. Buy Zone remains ACTIVE.");
-            BuyZoneIsBurned = false; 
-         } 
-      } 
-      CurrentOpenBuyTicket = 0;
-   } 
+   for (int slot = 0; slot < 20; slot++) {
+       if (MemOpenBuyTicket[slot] != 0 && !PositionSelectByTicket(MemOpenBuyTicket[slot])) { 
+          if (HistorySelectByPosition((long)MemOpenBuyTicket[slot])) { 
+             double totalProfit = 0;
+             int deals = HistoryDealsTotal(); 
+             for(int i = 0; i < deals; i++) { 
+                ulong ticket = HistoryDealGetTicket(i);
+                totalProfit += (HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION));
+             } 
+             if (totalProfit < 0) { 
+                Print(">>> BUY Trade LOSS. Buy Zone [Slot ", slot, "] BURNED.");
+                MemBuyZoneIsBurned[slot] = true; 
+             } else { 
+                Print(">>> BUY Trade WIN. Buy Zone [Slot ", slot, "] remains ACTIVE.");
+                MemBuyZoneIsBurned[slot] = false; 
+             } 
+          } 
+          MemOpenBuyTicket[slot] = 0;
+       } 
 
-   if (BuyZoneIsBurned && Enable_Phoenix_Sweep && activeDemand_HTF.isActive) {
-       MqlRates rates[];
-       ArraySetAsSeries(rates, true);
-       if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
-           if (rates[0].time != LastPhoenixBuyTime) {
-               double checkBottom = activeDemand_LTF.isActive ? activeDemand_LTF.bottom : activeDemand_HTF.bottom;
-               if (rates[0].close >= checkBottom) {
-                   Print(">>> PHOENIX RECOVERY (BUY): 1H Candle swept but closed safe. Un-burning Zone!");
-                   BuyZoneIsBurned = false;
-                   CurrentBuyZoneTradeCount = 0; 
-                   LastPhoenixBuyTime = rates[0].time; 
+       if (MemBuyZoneIsBurned[slot] && Enable_Phoenix_Sweep && activeDemand_HTF.isActive) {
+           MqlRates rates[];
+           ArraySetAsSeries(rates, true);
+           if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
+               if (rates[0].time != LastPhoenixBuyTime[slot]) {
+                   double checkBottom = activeDemand_LTF.isActive ? activeDemand_LTF.bottom : activeDemand_HTF.bottom;
+                   if (rates[0].close >= checkBottom) {
+                       Print(">>> PHOENIX RECOVERY (BUY): 1H Candle swept but closed safe. Un-burning Zone [Slot ", slot, "]!");
+                       MemBuyZoneIsBurned[slot] = false;
+                       MemBuyZoneTradeCount[slot] = 0; 
+                       LastPhoenixBuyTime[slot] = rates[0].time; 
+                   }
                }
            }
        }
-   }
 
-   if (CurrentOpenSellTicket != 0 && !PositionSelectByTicket(CurrentOpenSellTicket)) { 
-      if (HistorySelectByPosition((long)CurrentOpenSellTicket)) { 
-         double totalProfit = 0;
-         int deals = HistoryDealsTotal(); 
-         for(int i = 0; i < deals; i++) { 
-            ulong ticket = HistoryDealGetTicket(i);
-            totalProfit += (HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION));
-         } 
-         if (totalProfit < 0) { 
-            Print(">>> SELL Trade LOSS. Sell Zone BURNED.");
-            SellZoneIsBurned = true; 
-         } else { 
-            Print(">>> SELL Trade WIN. Sell Zone remains ACTIVE.");
-            SellZoneIsBurned = false; 
-         } 
-      } 
-      CurrentOpenSellTicket = 0;
-   } 
-   
-   if (SellZoneIsBurned && Enable_Phoenix_Sweep && activeSupply_HTF.isActive) {
-       MqlRates rates[];
-       ArraySetAsSeries(rates, true);
-       if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
-           if (rates[0].time != LastPhoenixSellTime) {
-               double checkTop = activeSupply_LTF.isActive ? activeSupply_LTF.top : activeSupply_HTF.top;
-               if (rates[0].close <= checkTop) {
-                   Print(">>> PHOENIX RECOVERY (SELL): 1H Candle swept but closed safe. Un-burning Zone!");
-                   SellZoneIsBurned = false;
-                   CurrentSellZoneTradeCount = 0; 
-                   LastPhoenixSellTime = rates[0].time; 
+       if (MemOpenSellTicket[slot] != 0 && !PositionSelectByTicket(MemOpenSellTicket[slot])) { 
+          if (HistorySelectByPosition((long)MemOpenSellTicket[slot])) { 
+             double totalProfit = 0;
+             int deals = HistoryDealsTotal(); 
+             for(int i = 0; i < deals; i++) { 
+                ulong ticket = HistoryDealGetTicket(i);
+                totalProfit += (HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION));
+             } 
+             if (totalProfit < 0) { 
+                Print(">>> SELL Trade LOSS. Sell Zone [Slot ", slot, "] BURNED.");
+                MemSellZoneIsBurned[slot] = true; 
+             } else { 
+                Print(">>> SELL Trade WIN. Sell Zone [Slot ", slot, "] remains ACTIVE.");
+                MemSellZoneIsBurned[slot] = false; 
+             } 
+          } 
+          MemOpenSellTicket[slot] = 0;
+       } 
+       
+       if (MemSellZoneIsBurned[slot] && Enable_Phoenix_Sweep && activeSupply_HTF.isActive) {
+           MqlRates rates[];
+           ArraySetAsSeries(rates, true);
+           if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
+               if (rates[0].time != LastPhoenixSellTime[slot]) {
+                   double checkTop = activeSupply_LTF.isActive ? activeSupply_LTF.top : activeSupply_HTF.top;
+                   if (rates[0].close <= checkTop) {
+                       Print(">>> PHOENIX RECOVERY (SELL): 1H Candle swept but closed safe. Un-burning Zone [Slot ", slot, "]!");
+                       MemSellZoneIsBurned[slot] = false;
+                       MemSellZoneTradeCount[slot] = 0; 
+                       LastPhoenixSellTime[slot] = rates[0].time; 
+                   }
                }
            }
        }
