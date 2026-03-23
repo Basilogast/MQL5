@@ -432,10 +432,10 @@ void CheckTradeEntry()
       
       if (ZiZ_AllowBreakout) {
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
+             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
          if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_HTF, activeDemand_LTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
+             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_HTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
          }
       }
       return;
@@ -457,10 +457,10 @@ void CheckTradeEntry()
           }
           if (Simple_Breakout_HTF) { 
              if (activeFlippedSupply_HTF.isActive && activeSupply_HTF.isActive && activeFlippedSupply_HTF.endTime == 0) 
-                ExecuteEntryLogic(activeFlippedSupply_HTF, activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF", ReferenceZonePips_HTF);
+                ExecuteEntryLogic(activeFlippedSupply_HTF, activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF", ReferenceZonePips_HTF);
              
              if (activeFlippedDemand_HTF.isActive && activeDemand_HTF.isActive && activeFlippedDemand_HTF.endTime == 0) 
-                ExecuteEntryLogic(activeFlippedDemand_HTF, activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF", ReferenceZonePips_HTF);
+                ExecuteEntryLogic(activeFlippedDemand_HTF, activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF", ReferenceZonePips_HTF);
           }
       }
 
@@ -487,10 +487,10 @@ void CheckTradeEntry()
           }
           if (Simple_Breakout_LTF) { 
              if (activeFlippedSupply_LTF.isActive && activeSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-                if (allowBuys) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF);
              }
              if (activeFlippedDemand_LTF.isActive && activeDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-                if (allowSells) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "LTF", ReferenceZonePips_LTF);
              }
           }
       }
@@ -609,7 +609,8 @@ void ManageOpenPositions() {
             }
             else if (type == POSITION_TYPE_SELL) {
                 if (currentSL > openPrice) { 
-                    double riskDist = currentSL - openPrice;
+     
+                double riskDist = currentSL - openPrice;
                     if (riskDist > 0) {
                         double profitDist = openPrice - currentAsk;
                         if ((profitDist / riskDist) >= RR_Lock_Trigger) {
@@ -626,7 +627,8 @@ void ManageOpenPositions() {
 
 void ManageTradeState() { 
    for (int slot = 0; slot < 20; slot++) {
-       if (MemOpenBuyTicket[slot] != 0 && !PositionSelectByTicket(MemOpenBuyTicket[slot])) { 
+       if (MemOpenBuyTicket[slot] 
+            != 0 && !PositionSelectByTicket(MemOpenBuyTicket[slot])) { 
           if (HistorySelectByPosition((long)MemOpenBuyTicket[slot])) { 
              double totalProfit = 0;
              int deals = HistoryDealsTotal(); 
@@ -648,13 +650,13 @@ void ManageTradeState() {
        // --- PHOENIX SWEEP FILTER: Chặn không cho Breakout (1,4,9) và FVG (2,5,10) được hồi sinh ---
        bool canPhoenix = true;
        if (slot == 1 || slot == 2 || slot == 4 || slot == 5 || slot == 9 || slot == 10) canPhoenix = false;
-
        if (MemBuyZoneIsBurned[slot] && Enable_Phoenix_Sweep && activeDemand_HTF.isActive && canPhoenix) {
            MqlRates rates[];
            ArraySetAsSeries(rates, true);
            if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
                if (rates[0].time != LastPhoenixBuyTime[slot]) {
-                   double checkBottom = activeDemand_LTF.isActive ? activeDemand_LTF.bottom : activeDemand_HTF.bottom;
+                   double checkBottom = activeDemand_LTF.isActive ?
+                        activeDemand_LTF.bottom : activeDemand_HTF.bottom;
                    if (rates[0].close >= checkBottom) {
                        Print(">>> PHOENIX RECOVERY (BUY): 1H Candle swept but closed safe. Un-burning Zone [Slot ", slot, "]!");
                        MemBuyZoneIsBurned[slot] = false;
@@ -689,7 +691,8 @@ void ManageTradeState() {
            ArraySetAsSeries(rates, true);
            if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
                if (rates[0].time != LastPhoenixSellTime[slot]) {
-                   double checkTop = activeSupply_LTF.isActive ? activeSupply_LTF.top : activeSupply_HTF.top;
+                   double checkTop = activeSupply_LTF.isActive ?
+                        activeSupply_LTF.top : activeSupply_HTF.top;
                    if (rates[0].close <= checkTop) {
                        Print(">>> PHOENIX RECOVERY (SELL): 1H Candle swept but closed safe. Un-burning Zone [Slot ", slot, "]!");
                        MemSellZoneIsBurned[slot] = false;
@@ -720,27 +723,27 @@ void ExportTransactionsToCSV()
          
          if(type == DEAL_TYPE_BUY || type == DEAL_TYPE_SELL) 
          {
-            string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
+            string sType = (type == DEAL_TYPE_BUY) ?
+                        "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
             
             string strategyType = "OTHER";
             if (StringFind(rawComment, "Brk HTF") >= 0) strategyType = "HTF-BREAKOUT";
             else if (StringFind(rawComment, "Brk LTF") >= 0) strategyType = "LTF-BREAKOUT";
             else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT"; 
-            else if (StringFind(rawComment, "FVG-Swing") >= 0) strategyType = "FVG-SWING"; 
+            else if (StringFind(rawComment, "FVG-Swing") >= 0) strategyType = "FVG-SWING";
             else if (StringFind(rawComment, "FVG-LTF") >= 0) strategyType = "FVG-SIMPLE";  
-            else if (StringFind(rawComment, "FVG-HTF") >= 0) strategyType = "FVG-HTF"; 
+            else if (StringFind(rawComment, "FVG-HTF") >= 0) strategyType = "FVG-HTF";
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "LTF") >= 0) strategyType = "LTF-SIMPLE";
             else if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
             else if (StringFind(rawComment, "Swing") >= 0) strategyType = "SWING";
             else if (StringFind(rawComment, "Scalp") >= 0) strategyType = "SCALP";
-            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE"; 
+            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE";
             else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE";
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
-            
             int startIdx = StringFind(rawComment, "[H:");
             if (startIdx >= 0) {
                string sub = StringSubstr(rawComment, startIdx + 3);
@@ -783,16 +786,18 @@ void ExportTransactionsToCSV()
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_VOLUME), 2),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PRICE), 5),
                DoubleToString(rawProfit, 2),
-               DoubleToString(comm, 2),    
+   
+                            DoubleToString(comm, 2),    
                DoubleToString(swap, 2),    
                DoubleToString(netProfit, 2), 
                DoubleToString(historicalADR, 1), 
                strategyType, 
-               rawComment, 
+             
+                rawComment, 
                h1_trend,   
                m15_trend   
             );
-         }
+      }
       }
       
       if (MQLInfoInteger(MQL_TESTER)) {
@@ -825,23 +830,25 @@ void ExportTransactionsToCSV()
                           if (CopyHigh(_Symbol, PERIOD_D1, shift + 1, ADR_Period, hBuf) == ADR_Period &&
                               CopyLow(_Symbol, PERIOD_D1, shift + 1, ADR_Period, lBuf) == ADR_Period) {
                               
-                              double sumPips = 0;
-                              for(int j = 0; j < ADR_Period; j++) {
+                     
+                                double sumPips = 0;
+                                for(int j = 0; j < ADR_Period; j++) {
                                   sumPips += (hBuf[j] - lBuf[j]) / point;
-                              }
+                                }
                               double dailyADR = (sumPips / ADR_Period) / 10.0;
                               if (dailyADR < Stats_ADR_Low) lowCount++;
                               else if (dailyADR > Stats_ADR_High) highCount++;
                               else midCount++;
                               
                               totalDays++;
-                          }
+                              }
                       }
                   }
               }
           }
           
           if (totalDays > 0) {
+            
               FileWrite(file_handle, "Period Analyzed", TimeToString(startTest) + " to " + TimeToString(endTest));
               FileWrite(file_handle, "Total Days Analyzed", (string)totalDays);
               FileWrite(file_handle, "Zone", "Count", "Percent");
