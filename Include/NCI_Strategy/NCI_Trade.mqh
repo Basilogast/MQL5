@@ -645,7 +645,11 @@ void ManageTradeState() {
           MemOpenBuyTicket[slot] = 0;
        } 
 
-       if (MemBuyZoneIsBurned[slot] && Enable_Phoenix_Sweep && activeDemand_HTF.isActive) {
+       // --- PHOENIX SWEEP FILTER: Chặn không cho Breakout (1,4,9) và FVG (2,5,10) được hồi sinh ---
+       bool canPhoenix = true;
+       if (slot == 1 || slot == 2 || slot == 4 || slot == 5 || slot == 9 || slot == 10) canPhoenix = false;
+
+       if (MemBuyZoneIsBurned[slot] && Enable_Phoenix_Sweep && activeDemand_HTF.isActive && canPhoenix) {
            MqlRates rates[];
            ArraySetAsSeries(rates, true);
            if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
@@ -680,7 +684,7 @@ void ManageTradeState() {
           MemOpenSellTicket[slot] = 0;
        } 
        
-       if (MemSellZoneIsBurned[slot] && Enable_Phoenix_Sweep && activeSupply_HTF.isActive) {
+       if (MemSellZoneIsBurned[slot] && Enable_Phoenix_Sweep && activeSupply_HTF.isActive && canPhoenix) {
            MqlRates rates[];
            ArraySetAsSeries(rates, true);
            if(CopyRates(_Symbol, TimeFrame_HTF, 1, 1, rates) == 1) {
