@@ -25,13 +25,12 @@ void DrawSingleZone(string suffix, datetime t1, datetime t2, double top, double 
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
-
    string name = "NCI_Zone_" + suffix + IntegerToString(id) + "_" + TimeToString(t1);
    color c;
    if (suffix == "_HTF") {
-       c = (type == 1) ? clrIndianRed : clrMediumSeaGreen; 
+       c = (type == 1) ? clrIndianRed : clrMediumSeaGreen;
    } else {
-       c = (type == 1) ? SupplyColor : DemandColor; 
+       c = (type == 1) ? SupplyColor : DemandColor;
    }
 
    if(ObjectFind(0,name)<0) { 
@@ -50,14 +49,12 @@ void DrawFlippedZone(string suffix, MergedZoneState &state, datetime endTime) {
    if (MQLInfoInteger(MQL_OPTIMIZATION)) return;
    if (suffix == "_HTF" && !ShowHTF) return;
    if (suffix == "_LTF" && !ShowLTF) return;
-
    string name = "NCI_Flip_" + suffix + TimeToString(state.startTime);
    color c = FlippedColor;
-   if (suffix == "_HTF") c = clrSilver; 
-
+   if (suffix == "_HTF") c = clrSilver;
    if(ObjectFind(0,name)<0) {
       ObjectCreate(0, name, OBJ_RECTANGLE, 0, state.startTime, state.top, endTime, state.bottom);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
+      ObjectSetInteger(0, name, OBJPROP_COLOR, c);
       ObjectSetInteger(0, name, OBJPROP_FILL, true); 
       ObjectSetInteger(0, name, OBJPROP_BACK, true);
    } else {
@@ -86,17 +83,23 @@ datetime CheckZoneLife(ENUM_TIMEFRAMES tf, int startBar, int type, double target
 {
    for(int i = startBar - 1; i > 0; i--) 
    {
+      // 1. Kiểm tra xem có chạm Target (Hoàn thành sứ mệnh) không
       if (targetLevel != 0) {
-          if (type == 1) { if (CheckForBreakout(tf, i+1, i, targetLevel, 1)) return GetTime(tf, i); } 
-          else { if (CheckForBreakout(tf, i+1, i, targetLevel, -1)) return GetTime(tf, i); }
+          if (type == 1) { if (CheckForBreakout(tf, i+1, i, targetLevel, 1)) return GetTime(tf, i);
+          } 
+          else { if (CheckForBreakout(tf, i+1, i, targetLevel, -1)) return GetTime(tf, i);
+          }
       }
       
-      if (!isFlipped) {
-          if (type == 1) { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, -1)) return GetTime(tf, i); } 
-          else { if (CheckForBreakout(tf, i+1, i, selfBreakLevel, 1)) return GetTime(tf, i); }
+      // 2. [ĐÃ FIX BUG] Kiểm tra xem có bị giá đâm xuyên qua không (Áp dụng cho cả Zone thường lẫn Zone Xám)
+      if (type == 1) { 
+          if (CheckForBreakout(tf, i+1, i, selfBreakLevel, -1)) return GetTime(tf, i);
+      } 
+      else { 
+          if (CheckForBreakout(tf, i+1, i, selfBreakLevel, 1)) return GetTime(tf, i);
       }
    }
-   return 0; 
+   return 0;
 }
 
 void DrawFVGZone(string suffix, datetime t1, datetime t2, double top, double bottom, int type, int id) {
@@ -108,20 +111,19 @@ void DrawFVGZone(string suffix, datetime t1, datetime t2, double top, double bot
    if (suffix == "_LTF" && !ShowLTF) return;
 
    string name = "NCI_FVG_" + suffix + IntegerToString(id) + "_" + TimeToString(t1);
-   color c = (type == 1) ? FVG_Bear_Color : FVG_Bull_Color; 
-
+   color c = (type == 1) ? FVG_Bear_Color : FVG_Bull_Color;
    if(ObjectFind(0, name) < 0) {
       ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, (t2 == 0) ? TimeCurrent() : t2, bottom);
       ObjectSetInteger(0, name, OBJPROP_COLOR, c); 
       ObjectSetInteger(0, name, OBJPROP_FILL, false); 
       ObjectSetInteger(0, name, OBJPROP_BACK, false); 
-      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);    
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
    } else {
       ObjectSetInteger(0, name, OBJPROP_TIME, 1, (t2 == 0) ? TimeCurrent() : t2);
       ObjectSetInteger(0, name, OBJPROP_COLOR, c);
       ObjectSetInteger(0, name, OBJPROP_FILL, false); 
       ObjectSetInteger(0, name, OBJPROP_BACK, false); 
-      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);    
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
    }
 }
 
@@ -133,17 +135,14 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    }
    
    activeFlipSup.isActive = false; 
-   activeFlipDem.isActive = false; 
-   
+   activeFlipDem.isActive = false;
    int count = ArraySize(points);
    if (count == 0) return; 
    
    MergedZoneState supply; supply.isActive = false; 
    MergedZoneState demand; demand.isActive = false;
-   
    MergedZoneState fvgSupply; fvgSupply.isActive = false;
    MergedZoneState fvgDemand; fvgDemand.isActive = false;
-
    for (int i = 0; i < count; i++) { 
       PointStruct p = points[i];
       if (p.zoneLimitTop == 0 && p.zoneLimitBottom == 0) continue;
@@ -151,12 +150,13 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
       if (p.type == 1) { // SUPPLY
          if (!supply.isActive) {
              StartZone(supply, p);
-             if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time; } 
-             else { fvgSupply.isActive = false; }
+             if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time;
+             } 
+             else { fvgSupply.isActive = false;
+             }
          }
          else { 
             datetime preciseBreakTime = FindBreakoutTime(tf, supply.lastBarIndex, p.barIndex, supply.top, 1);
-            
             // --- [NEW] INDEPENDENT FVG DEATH SCANNER (HISTORICAL) ---
             if (fvgSupply.isActive) {
                 // Bearish FVG dies if price breaks ABOVE its top (Stop Loss side)
@@ -169,7 +169,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
 
             if (preciseBreakTime > 0) { 
                DrawSingleZone(suffix, supply.startTime, preciseBreakTime, supply.top, supply.bottom, 1, i-1);
-               if (fvgSupply.isActive) { DrawFVGZone(suffix, fvgSupply.startTime, preciseBreakTime, fvgSupply.top, fvgSupply.bottom, 1, i-1); fvgSupply.isActive = false; }
+               if (fvgSupply.isActive) { DrawFVGZone(suffix, fvgSupply.startTime, preciseBreakTime, fvgSupply.top, fvgSupply.bottom, 1, i-1); fvgSupply.isActive = false;
+               }
                
                if (Use_Strict_SMC_Zones || p.assignedTrend != 1) { 
                    if (activeFlipDem.isActive) {
@@ -201,8 +202,10 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                    }
                }
                StartZone(supply, p);
-               if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time; } 
-               else { fvgSupply.isActive = false; }
+               if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time;
+               } 
+               else { fvgSupply.isActive = false;
+               }
             } else { 
                bool shouldMerge = false;
                if (p.zoneLimitTop > supply.top) shouldMerge = true; 
@@ -214,13 +217,16 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                   DrawSingleZone(suffix, supply.startTime, p.time, supply.top, supply.bottom, 1, i-1);
                   if (fvgSupply.isActive) DrawFVGZone(suffix, fvgSupply.startTime, p.time, fvgSupply.top, fvgSupply.bottom, 1, i-1);
                   MergeZone(supply, p, 1); 
-                  if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time; }
+                  if (p.hasFVG) { fvgSupply.isActive = true;
+                  fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time; }
                } else { 
                   DrawSingleZone(suffix, supply.startTime, p.time, supply.top, supply.bottom, 1, i-1);
                   if (fvgSupply.isActive) DrawFVGZone(suffix, fvgSupply.startTime, p.time, fvgSupply.top, fvgSupply.bottom, 1, i-1);
                   StartZone(supply, p); 
-                  if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time; } 
-                  else { fvgSupply.isActive = false; }
+                  if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop;
+                  fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time; } 
+                  else { fvgSupply.isActive = false;
+                  }
                } 
             } 
          } 
@@ -228,12 +234,13 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
       else if (p.type == -1) { // DEMAND
          if (!demand.isActive) {
              StartZone(demand, p);
-             if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time; } 
-             else { fvgDemand.isActive = false; }
+             if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time;
+             } 
+             else { fvgDemand.isActive = false;
+             }
          }
          else { 
             datetime preciseBreakTime = FindBreakoutTime(tf, demand.lastBarIndex, p.barIndex, demand.bottom, -1);
-            
             // --- [NEW] INDEPENDENT FVG DEATH SCANNER (HISTORICAL) ---
             if (fvgDemand.isActive) {
                 // Bullish FVG dies if price breaks BELOW its bottom (Stop Loss side)
@@ -246,7 +253,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
 
             if (preciseBreakTime > 0) { 
                DrawSingleZone(suffix, demand.startTime, preciseBreakTime, demand.top, demand.bottom, -1, i-1);
-               if (fvgDemand.isActive) { DrawFVGZone(suffix, fvgDemand.startTime, preciseBreakTime, fvgDemand.top, fvgDemand.bottom, -1, i-1); fvgDemand.isActive = false; }
+               if (fvgDemand.isActive) { DrawFVGZone(suffix, fvgDemand.startTime, preciseBreakTime, fvgDemand.top, fvgDemand.bottom, -1, i-1); fvgDemand.isActive = false;
+               }
 
                if (Use_Strict_SMC_Zones || p.assignedTrend != -1) { 
                    if (activeFlipDem.isActive) {
@@ -278,8 +286,10 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                    }
                }
                StartZone(demand, p);
-               if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time; } 
-               else { fvgDemand.isActive = false; }
+               if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time;
+               } 
+               else { fvgDemand.isActive = false;
+               }
             } else { 
                bool shouldMerge = false;
                if (p.zoneLimitBottom < demand.bottom) shouldMerge = true; 
@@ -291,13 +301,16 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                   DrawSingleZone(suffix, demand.startTime, p.time, demand.top, demand.bottom, -1, i-1);
                   if (fvgDemand.isActive) DrawFVGZone(suffix, fvgDemand.startTime, p.time, fvgDemand.top, fvgDemand.bottom, -1, i-1);
                   MergeZone(demand, p, -1); 
-                  if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time; }
+                  if (p.hasFVG) { fvgDemand.isActive = true;
+                  fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time; }
                } else { 
                   DrawSingleZone(suffix, demand.startTime, p.time, demand.top, demand.bottom, -1, i-1);
                   if (fvgDemand.isActive) DrawFVGZone(suffix, fvgDemand.startTime, p.time, fvgDemand.top, fvgDemand.bottom, -1, i-1);
                   StartZone(demand, p); 
-                  if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time; } 
-                  else { fvgDemand.isActive = false; }
+                  if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop;
+                  fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time; } 
+                  else { fvgDemand.isActive = false;
+                  }
                } 
             } 
          } 
@@ -306,7 +319,6 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    
    if (supply.isActive) {
       int startBar = iBarShift(_Symbol, tf, supply.startTime);
-      
       // --- [NEW] INDEPENDENT FVG DEATH SCANNER (LIVE EDGE) ---
       if (fvgSupply.isActive) {
           datetime fvgDeadTime = FindBreakoutTime(tf, startBar, 0, fvgSupply.top, 1);
@@ -318,9 +330,10 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
 
       datetime deadTime = FindBreakoutTime(tf, startBar, 0, supply.top, 1);
       if(deadTime > 0) {
-         DrawSingleZone(suffix, supply.startTime, deadTime, supply.top, supply.bottom, 1, 999991); 
+         DrawSingleZone(suffix, supply.startTime, deadTime, supply.top, supply.bottom, 1, 999991);
          supply.isActive = false;
-         if (fvgSupply.isActive) { DrawFVGZone(suffix, fvgSupply.startTime, deadTime, fvgSupply.top, fvgSupply.bottom, 1, 999991); fvgSupply.isActive = false; }
+         if (fvgSupply.isActive) { DrawFVGZone(suffix, fvgSupply.startTime, deadTime, fvgSupply.top, fvgSupply.bottom, 1, 999991); fvgSupply.isActive = false;
+         }
          
          if (activeFlipDem.isActive) {
              datetime end = deadTime;
@@ -338,7 +351,6 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
          MergedZoneState flip = supply;
          flip.isActive = true;
          flip.startTime = deadTime;
-         
          int breakBar = iBarShift(_Symbol, tf, deadTime);
          double futureTarget = FindFutureTarget(points, count-1, 1, supply.top);
          datetime deathTime = CheckZoneLife(tf, breakBar, 1, futureTarget, supply.bottom, true);
@@ -356,7 +368,6 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    
    if (demand.isActive) {
       int startBar = iBarShift(_Symbol, tf, demand.startTime);
-      
       // --- [NEW] INDEPENDENT FVG DEATH SCANNER (LIVE EDGE) ---
       if (fvgDemand.isActive) {
           datetime fvgDeadTime = FindBreakoutTime(tf, startBar, 0, fvgDemand.bottom, -1);
@@ -368,9 +379,10 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
 
       datetime deadTime = FindBreakoutTime(tf, startBar, 0, demand.bottom, -1);
       if(deadTime > 0) {
-         DrawSingleZone(suffix, demand.startTime, deadTime, demand.top, demand.bottom, -1, 999992); 
+         DrawSingleZone(suffix, demand.startTime, deadTime, demand.top, demand.bottom, -1, 999992);
          demand.isActive = false;
-         if (fvgDemand.isActive) { DrawFVGZone(suffix, fvgDemand.startTime, deadTime, fvgDemand.top, fvgDemand.bottom, -1, 999992); fvgDemand.isActive = false; }
+         if (fvgDemand.isActive) { DrawFVGZone(suffix, fvgDemand.startTime, deadTime, fvgDemand.top, fvgDemand.bottom, -1, 999992); fvgDemand.isActive = false;
+         }
          
          if (activeFlipDem.isActive) {
              datetime end = deadTime;
@@ -388,7 +400,6 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
          MergedZoneState flip = demand;
          flip.isActive = true;
          flip.startTime = deadTime;
-         
          int breakBar = iBarShift(_Symbol, tf, deadTime);
          double futureTarget = FindFutureTarget(points, count-1, -1, demand.bottom);
          datetime deathTime = CheckZoneLife(tf, breakBar, -1, futureTarget, demand.top, true);
@@ -410,12 +421,17 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    if (fvgSupply.isActive) DrawFVGZone(suffix, fvgSupply.startTime, TimeCurrent()+PeriodSeconds(tf)*50, fvgSupply.top, fvgSupply.bottom, 1, 999993);
    if (fvgDemand.isActive) DrawFVGZone(suffix, fvgDemand.startTime, TimeCurrent()+PeriodSeconds(tf)*50, fvgDemand.top, fvgDemand.bottom, -1, 999994);
 
+   // --- DATA BRIDGE FIX: FORCE SYNC TO GLOBAL VARIABLES ---
    if (suffix == "_HTF") {
        activeFVGSupply_HTF = fvgSupply;
        activeFVGDemand_HTF = fvgDemand;
+       activeFlippedSupply_HTF = activeFlipSup; 
+       activeFlippedDemand_HTF = activeFlipDem; 
    } else if (suffix == "_LTF") {
        activeFVGSupply_LTF = fvgSupply;
        activeFVGDemand_LTF = fvgDemand;
+       activeFlippedSupply_LTF = activeFlipSup; 
+       activeFlippedDemand_LTF = activeFlipDem; 
    }
    
    activeSup = supply; 
