@@ -341,9 +341,14 @@ void CheckTradeEntry()
        }
    }
 
+   // --- BỘ LỌC ADR MỚI (RADAR THỜI TIẾT) ---
+   bool isStorm = false;
+   bool isRange = false;
    double currentADR = CalculateADR(ADR_Period);
+   
    if (Use_ADR_Filter) {
        if (currentADR < SectorC_Max_ADR) {
+           isRange = true;
            if (Enable_SectorC_Range) {
                if (activeDemand_LTF.isActive) {
                    ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Range-Fade", ReferenceZonePips_LTF);
@@ -352,9 +357,10 @@ void CheckTradeEntry()
                    ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Range-Fade", ReferenceZonePips_LTF);
                }
            }
-           return;
+           // ĐÃ XÓA return;
        }
        else if (currentADR > SectorE_Min_ADR) {
+           isStorm = true;
            if (Enable_SectorE_Storm) {
                double activeDepth = Storm_Entry_Depth;
                double activeBuffer = Storm_Buffer_Pips * 10.0; 
@@ -384,83 +390,99 @@ void CheckTradeEntry()
                    }
                }
            }
-           return;
+           // ĐÃ XÓA return;
        }
    }
 
+   // --- MODE ZONE IN ZONE (ĐÃ ĐƯỢC BẢO VỆ) ---
    if (Enable_ZiZ_Mode) {
-      if (ZiZ_AllowTrend) {
-         if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && IsOverlapping(activeFVGDemand_LTF, activeDemand_HTF)) {
-             if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "FVG-Swing", ReferenceZonePips_LTF);
-         }
-         if (Enable_FVG_Zones && activeFVGSupply_LTF.isActive && IsOverlapping(activeFVGSupply_LTF, activeSupply_HTF)) {
-             if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-Swing", ReferenceZonePips_LTF);
-         }
+      if (!isStorm && !isRange) {
+          if (ZiZ_AllowTrend) {
+             if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && IsOverlapping(activeFVGDemand_LTF, activeDemand_HTF)) {
+                 if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "FVG-Swing", ReferenceZonePips_LTF);
+             }
+             if (Enable_FVG_Zones && activeFVGSupply_LTF.isActive && IsOverlapping(activeFVGSupply_LTF, activeSupply_HTF)) {
+                 if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-Swing", ReferenceZonePips_LTF);
+             }
 
-         if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
-             if (currentMarketTrend_HTF == 1) {
-                 bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                 if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
-             } else {
-                 bool allowTrade = true;
-                 if (UseToxicFilter && currentMarketTrend_LTF == 1) allowTrade = false;
-                 if (allowTrade) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+             if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
+                 if (currentMarketTrend_HTF == 1) {
+                     bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+                     if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
+                 } else {
+                     bool allowTrade = true;
+                     if (UseToxicFilter && currentMarketTrend_LTF == 1) allowTrade = false;
+                     if (allowTrade) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                 }
              }
-         }
-         if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
-             if (currentMarketTrend_HTF == -1) {
-                 bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                 if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
-             } else {
-                 bool allowTrade = true;
-                 if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
-                 if (allowTrade) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+             if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
+                 if (currentMarketTrend_HTF == -1) {
+                     bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
+                     if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
+                 } else {
+                     bool allowTrade = true;
+                     if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
+                     if (allowTrade) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                 }
              }
-         }
-      }
+          }
 
-      if (ZiZ_AllowStairStep) {
-         if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
-             ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
-         }
-         if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
-             if (!ZiZ_BlockStepSell) {
-                 ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+          if (ZiZ_AllowStairStep) {
+             if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
+                 ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
              }
-         }
+             if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
+                 if (!ZiZ_BlockStepSell) {
+                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+                 }
+             }
+          }
       }
       
+      // Breakout luôn được phép đánh kể cả khi có Storm
       if (ZiZ_AllowBreakout) {
+         double brkEntryDepth = isStorm ? Storm_Entry_Depth : -1.0;
+         double brkBuffer = isStorm ? (Storm_Buffer_Pips * 10.0) : -1.0;
+
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
+             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
          }
          if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_HTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF);
+             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_HTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
          }
       }
-      return;
+      return; 
    }
 
+   // --- MODE ĐƠN GIẢN (SIMPLE MODE) ---
    if (Enable_Simple_Mode) {
-      if (Simple_Trade_HTF) { 
-          if (Simple_Trend_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
-             
-             if (Enable_FVG_Zones && activeFVGDemand_HTF.isActive && currentMarketTrend_HTF == 1) {
-                 ExecuteEntryLogic(activeFVGDemand_HTF, activeFVGDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "FVG-HTF", ReferenceZonePips_HTF);
-             }
-             if (Enable_FVG_Zones && activeFVGSupply_HTF.isActive && currentMarketTrend_HTF == -1) {
-                 ExecuteEntryLogic(activeFVGSupply_HTF, activeFVGSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "FVG-HTF", ReferenceZonePips_HTF);
-             }
+      double brkEntryDepth = isStorm ? Storm_Entry_Depth : -1.0;
+      double brkBuffer = isStorm ? (Storm_Buffer_Pips * 10.0) : -1.0;
 
-             if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF", ReferenceZonePips_HTF);
-             else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF", ReferenceZonePips_HTF);
+      if (Simple_Trade_HTF) { 
+          // Chỉ đánh Vùng Gốc (Origin) khi sóng bình thường
+          if (!isStorm && !isRange) {
+              if (Simple_Trend_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
+                 
+                 if (Enable_FVG_Zones && activeFVGDemand_HTF.isActive && currentMarketTrend_HTF == 1) {
+                     ExecuteEntryLogic(activeFVGDemand_HTF, activeFVGDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "FVG-HTF", ReferenceZonePips_HTF);
+                 }
+                 if (Enable_FVG_Zones && activeFVGSupply_HTF.isActive && currentMarketTrend_HTF == -1) {
+                     ExecuteEntryLogic(activeFVGSupply_HTF, activeFVGSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "FVG-HTF", ReferenceZonePips_HTF);
+                 }
+
+                 if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF", ReferenceZonePips_HTF);
+                 else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF", ReferenceZonePips_HTF);
+              }
           }
+          
+          // Breakout luôn hoạt động (Được bơm sức mạnh nếu có bão)
           if (Simple_Breakout_HTF) { 
              if (activeFlippedSupply_HTF.isActive && activeSupply_HTF.isActive && activeFlippedSupply_HTF.endTime == 0) 
-                ExecuteEntryLogic(activeFlippedSupply_HTF, activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF", ReferenceZonePips_HTF);
+                ExecuteEntryLogic(activeFlippedSupply_HTF, activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF", ReferenceZonePips_HTF, brkEntryDepth, brkBuffer);
              
              if (activeFlippedDemand_HTF.isActive && activeDemand_HTF.isActive && activeFlippedDemand_HTF.endTime == 0) 
-                ExecuteEntryLogic(activeFlippedDemand_HTF, activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF", ReferenceZonePips_HTF);
+                ExecuteEntryLogic(activeFlippedDemand_HTF, activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF", ReferenceZonePips_HTF, brkEntryDepth, brkBuffer);
           }
       }
 
@@ -474,23 +496,28 @@ void CheckTradeEntry()
               else { allowBuys = false; allowSells = false; }
           }
           
-          if (Simple_Trend_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
-             if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && currentMarketTrend_LTF == 1 && allowBuys) {
-                 ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "FVG-LTF", ReferenceZonePips_LTF);
-             }
-             if (Enable_FVG_Zones && activeFVGSupply_LTF.isActive && currentMarketTrend_LTF == -1 && allowSells) {
-                 ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-LTF", ReferenceZonePips_LTF);
-             }
-             
-             if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
-             else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "LTF", ReferenceZonePips_LTF);
+          // Chỉ đánh Vùng Gốc (Origin) khi sóng bình thường
+          if (!isStorm && !isRange) {
+              if (Simple_Trend_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
+                 if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && currentMarketTrend_LTF == 1 && allowBuys) {
+                     ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "FVG-LTF", ReferenceZonePips_LTF);
+                 }
+                 if (Enable_FVG_Zones && activeFVGSupply_LTF.isActive && currentMarketTrend_LTF == -1 && allowSells) {
+                     ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-LTF", ReferenceZonePips_LTF);
+                 }
+                 
+                 if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
+                 else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "LTF", ReferenceZonePips_LTF);
+              }
           }
+          
+          // Breakout luôn hoạt động (Được bơm sức mạnh nếu có bão)
           if (Simple_Breakout_LTF) { 
              if (activeFlippedSupply_LTF.isActive && activeSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
              }
              if (activeFlippedDemand_LTF.isActive && activeDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "LTF", ReferenceZonePips_LTF);
+                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "LTF", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
              }
           }
       }
@@ -727,20 +754,32 @@ void ExportTransactionsToCSV()
                         "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
             
+            // --- CẬP NHẬT: SẮP XẾP LẠI THỨ TỰ ƯU TIÊN PHÂN LOẠI LỆNH ---
             string strategyType = "OTHER";
-            if (StringFind(rawComment, "Brk HTF") >= 0) strategyType = "HTF-BREAKOUT";
-            else if (StringFind(rawComment, "Brk LTF") >= 0) strategyType = "LTF-BREAKOUT";
-            else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT"; 
+            // 1. STORM & RANGE (Đặc nhiệm thời tiết - Ưu tiên bắt trước)
+            if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE";
+            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE";
+            
+            // 2. FVG (Khoảng trống giá)
             else if (StringFind(rawComment, "FVG-Swing") >= 0) strategyType = "FVG-SWING";
-            else if (StringFind(rawComment, "FVG-LTF") >= 0) strategyType = "FVG-SIMPLE";  
             else if (StringFind(rawComment, "FVG-HTF") >= 0) strategyType = "FVG-HTF";
+            else if (StringFind(rawComment, "FVG-LTF") >= 0) strategyType = "FVG-LTF";
+            
+            // 3. BREAKOUT (Vùng Xám)
+            else if (StringFind(rawComment, "Brk HTF") >= 0) strategyType = "HTF-BREAKOUT";
+            else if (StringFind(rawComment, "Brk LTF") >= 0) strategyType = "LTF-BREAKOUT";
+            else if (StringFind(rawComment, "Brk ZiZ") >= 0) strategyType = "ZIZ-BREAKOUT";
+            else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT"; 
+            
+            // 4. ZIZ (Nhồi lệnh trong hộp)
+            else if (StringFind(rawComment, "ZiZ-Swing") >= 0) strategyType = "ZIZ-SWING";
+            else if (StringFind(rawComment, "ZiZ-Step") >= 0) strategyType = "ZIZ-STEP";
+            else if (StringFind(rawComment, "ZiZ-Scalp") >= 0) strategyType = "ZIZ-SCALP";
+            
+            // 5. SIMPLE ORIGIN (Vùng Gốc - Tên ngắn nhất nên phải đặt cuối cùng)
             else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
             else if (StringFind(rawComment, "LTF") >= 0) strategyType = "LTF-SIMPLE";
-            else if (StringFind(rawComment, "Step") >= 0) strategyType = "STEP";
-            else if (StringFind(rawComment, "Swing") >= 0) strategyType = "SWING";
-            else if (StringFind(rawComment, "Scalp") >= 0) strategyType = "SCALP";
-            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE";
-            else if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE";
+            // -------------------------------------------------------------
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
