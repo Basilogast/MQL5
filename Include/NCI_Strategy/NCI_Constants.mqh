@@ -62,13 +62,19 @@ input double BaseEntryDepth        = 0.40;
 input double BaseMaxDepth          = 0.75;  
 input double Normal_Max_Entry_Clamp = 0.60; 
 input double Normal_Max_Limit_Clamp = 0.80; 
-input double Breakout_HTF_Buffer_Pips = 50.0; 
 
 input group "Buffer Settings"
 input bool   UseDynamicBuffer = false;
 input double BaseBufferPoints = 45.0;
 input double MinBufferPoints  = 20;   
 input double MaxBufferPoints  = 200;
+
+input group "FVG Rules"
+input bool   Enable_FVG_Zones     = true; // [NEW] Master toggle for FVG Logic
+input int    FVG_Max_Scan_Bars    = 5;    // [NEW] Max candles to scan for FVG gap
+input double MinBodyPercent       = 0.50;
+input int    MaxScanDistance      = 3;
+input double BigCandleFactor      = 1.3;
 
 // ==============================================================================
 // GROUP 3: TAKE PROFIT LOGIC 
@@ -111,14 +117,6 @@ input bool   UseTimeFilter = true;
 input int    StartHour     = 7;    
 input int    EndHour       = 16;   
 
-input group "Structure Rules"
-input bool   Use_Strict_SMC_Zones = true; 
-input bool   Enable_FVG_Zones     = true; // [NEW] Master toggle for FVG Logic
-input int    FVG_Max_Scan_Bars    = 5;    // [NEW] Max candles to scan for FVG gap
-input double MinBodyPercent       = 0.50;
-input int    MaxScanDistance      = 3;
-input double BigCandleFactor      = 1.3;
-
 input group "Spread & Candle Filters"
 input bool   UseVolatilityGuard = true;
 input int    MaxSpreadPoints    = 25; 
@@ -142,6 +140,7 @@ input double Storm_Max_Limit_Clamp = 0.90;
 // GROUP 5: VISUALS & STATISTICS 
 // ==============================================================================
 input group "Visual Settings"
+input bool   Use_Strict_SMC_Zones = true; 
 input bool Show_ZigZag_Lines = true; 
 input bool Show_Zone_Boxes   = true; 
 input bool Show_FVG_Boxes    = true; // [NEW] Toggle to draw separate FVG boxes
