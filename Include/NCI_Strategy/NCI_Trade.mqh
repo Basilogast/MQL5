@@ -135,22 +135,23 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
    bool isFVG = (StringFind(commentTag, "FVG") >= 0); 
    if (isFVG) relevantTime += 1; 
 
-   // --- MEMORY SLOT MAPPING (ABSOLUTE ISOLATION) ---
-   int slot = 0;
-   if (commentTag == "HTF") slot = isBreakout ? 1 : 0;
-   else if (commentTag == "LTF") slot = isBreakout ? 4 : 3;
-   else if (commentTag == "FVG-HTF") slot = 2;
-   else if (commentTag == "FVG-LTF") slot = 5;
-   else if (commentTag == "ZiZ-Swing") slot = 6;
-   else if (StringFind(commentTag, "ZiZ-Scalp") >= 0) slot = 7;
-   else if (commentTag == "ZiZ-Step") slot = 8;
-   else if (commentTag == "ZiZ-Brk") slot = 9;
-   else if (commentTag == "FVG-Swing") slot = 10;
-   else if (commentTag == "Storm-Swing") slot = 11;
-   else if (commentTag == "Storm-Scalp") slot = 12;
-   else if (commentTag == "Storm-Step") slot = 13;
-   else if (commentTag == "Range-Fade") slot = 14;
-   else slot = 19; // Default fallback
+   // --- MEMORY SLOT MAPPING (NAMING CONVENTION V2) ---
+   int slot = 19; // Default fallback
+   if (StringFind(commentTag, "S-H-Ori-Nor-FVG") >= 0) slot = 2;
+   else if (StringFind(commentTag, "S-L-Ori-Nor-FVG") >= 0) slot = 5;
+   else if (StringFind(commentTag, "Z-H-Swg-Nor-FVG") >= 0) slot = 10;
+   else if (StringFind(commentTag, "S-H-Ori") >= 0) slot = 0;
+   else if (StringFind(commentTag, "S-H-Brk") >= 0) slot = 1;
+   else if (StringFind(commentTag, "S-L-Ori") >= 0) slot = 3;
+   else if (StringFind(commentTag, "S-L-Brk") >= 0) slot = 4;
+   else if (StringFind(commentTag, "Z-H-Swg-Nor") >= 0) slot = 6;
+   else if (StringFind(commentTag, "Z-L-Scl-Nor") >= 0) slot = 7;
+   else if (StringFind(commentTag, "Z-L-Stp-Nor") >= 0) slot = 8;
+   else if (StringFind(commentTag, "Z-L-Brk") >= 0) slot = 9;
+   else if (StringFind(commentTag, "Z-H-Swg-Stm") >= 0) slot = 11;
+   else if (StringFind(commentTag, "Z-L-Scl-Stm") >= 0) slot = 12;
+   else if (StringFind(commentTag, "Z-L-Stp-Stm") >= 0) slot = 13;
+   else if (StringFind(commentTag, "S-L-Fde-Rng") >= 0) slot = 14;
    // ------------------------------------------------
 
    int currentTradeCount = 0;
@@ -261,8 +262,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          reward = tp - ask;
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            string prefix = isBreakout ? "Brk " : ""; 
-            bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, prefix + commentTag, tradeRisk, slot);
+            bool res = OpenTrade(ORDER_TYPE_BUY, ask, sl, tp, commentTag, tradeRisk, slot);
             if (res && Debug_Show_Spread) Print(">>> SUCCESS: Buy Entry Sent.");
             return res;
          }
@@ -307,8 +307,7 @@ bool ExecuteEntryLogic(MergedZoneState &entryZone, MergedZoneState &slZone, Merg
          
          reward = bid - tp;
          if (risk > 0 && (reward / risk) >= MinRiskReward) {
-            string prefix = isBreakout ? "Brk " : "";
-            bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, prefix + commentTag, tradeRisk, slot);
+            bool res = OpenTrade(ORDER_TYPE_SELL, bid, sl, tp, commentTag, tradeRisk, slot);
             if (res && Debug_Show_Spread) Print(">>> SUCCESS: Sell Entry Sent.");
             return res;
          }
@@ -341,7 +340,7 @@ void CheckTradeEntry()
        }
    }
 
-   // --- BỘ LỌC ADR MỚI (RADAR THỜI TIẾT) ---
+   // --- BỘ LỌC ADR (RADAR THỜI TIẾT) ---
    bool isStorm = false;
    bool isRange = false;
    double currentADR = CalculateADR(ADR_Period);
@@ -351,13 +350,12 @@ void CheckTradeEntry()
            isRange = true;
            if (Enable_SectorC_Range) {
                if (activeDemand_LTF.isActive) {
-                   ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Range-Fade", ReferenceZonePips_LTF);
+                   ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "S-L-Fde-Rng", ReferenceZonePips_LTF);
                }
                if (activeSupply_LTF.isActive) {
-                   ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Range-Fade", ReferenceZonePips_LTF);
+                   ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "S-L-Fde-Rng", ReferenceZonePips_LTF);
                }
            }
-           // ĐÃ XÓA return;
        }
        else if (currentADR > SectorE_Min_ADR) {
            isStorm = true;
@@ -368,87 +366,86 @@ void CheckTradeEntry()
                if (ZiZ_AllowTrend) {
                    if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
                        if (currentMarketTrend_HTF == 1) {
-                           bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Storm-Swing", ReferenceZonePips_LTF, activeDepth, activeBuffer);
-                           if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "Storm-Scalp", ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                           bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Z-H-Swg-Stm", ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                           if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "Z-L-Scl-Stm", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                        } 
                    }
                    if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
                        if (currentMarketTrend_HTF == -1) {
-                           bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Storm-Swing", ReferenceZonePips_LTF, activeDepth, activeBuffer);
-                           if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Storm-Scalp", ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                           bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-H-Swg-Stm", ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                           if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-L-Scl-Stm", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                        }
                    }
                }
                if (ZiZ_AllowStairStep) {
                    if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
-                       ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Storm-Step", ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                       ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Z-L-Stp-Stm", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                    }
                    if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
                        if (!ZiZ_BlockStepSell) {
-                           ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Storm-Step", ReferenceZonePips_LTF, activeDepth, activeBuffer);
+                           ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-L-Stp-Stm", ReferenceZonePips_LTF, activeDepth, activeBuffer);
                        }
                    }
                }
            }
-           // ĐÃ XÓA return;
        }
    }
 
-   // --- MODE ZONE IN ZONE (ĐÃ ĐƯỢC BẢO VỆ) ---
+   // --- MODE ZONE IN ZONE ---
    if (Enable_ZiZ_Mode) {
       if (!isStorm && !isRange) {
           if (ZiZ_AllowTrend) {
              if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && IsOverlapping(activeFVGDemand_LTF, activeDemand_HTF)) {
-                 if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "FVG-Swing", ReferenceZonePips_LTF);
+                 if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Z-H-Swg-Nor-FVG", ReferenceZonePips_LTF);
              }
              if (Enable_FVG_Zones && activeFVGSupply_LTF.isActive && IsOverlapping(activeFVGSupply_LTF, activeSupply_HTF)) {
-                 if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-Swing", ReferenceZonePips_LTF);
+                 if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-H-Swg-Nor-FVG", ReferenceZonePips_LTF);
              }
 
              if (activeDemand_LTF.isActive && IsOverlapping(activeDemand_LTF, activeDemand_HTF)) {
                  if (currentMarketTrend_HTF == 1) {
-                     bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                     if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
+                     bool swingSuccess = ExecuteEntryLogic(activeDemand_LTF, activeDemand_HTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Z-H-Swg-Nor", ReferenceZonePips_LTF);
+                     if (!swingSuccess) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "Z-L-Scl-Nor", ReferenceZonePips_LTF);
                  } else {
                      bool allowTrade = true;
                      if (UseToxicFilter && currentMarketTrend_LTF == 1) allowTrade = false;
-                     if (allowTrade) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                     if (allowTrade) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "Z-L-Scl-Nor", ReferenceZonePips_LTF);
                  }
              }
              if (activeSupply_LTF.isActive && IsOverlapping(activeSupply_LTF, activeSupply_HTF)) {
                  if (currentMarketTrend_HTF == -1) {
-                     bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Swing", ReferenceZonePips_LTF);
-                     if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Scalp-FB", ReferenceZonePips_LTF);
+                     bool swingSuccess = ExecuteEntryLogic(activeSupply_LTF, activeSupply_HTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-H-Swg-Nor", ReferenceZonePips_LTF);
+                     if (!swingSuccess) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-L-Scl-Nor", ReferenceZonePips_LTF);
                  } else {
                      bool allowTrade = true;
                      if (UseToxicFilter && currentMarketTrend_LTF != 1) allowTrade = false;
-                     if (allowTrade) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Scalp", ReferenceZonePips_LTF);
+                     if (allowTrade) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-L-Scl-Nor", ReferenceZonePips_LTF);
                  }
              }
           }
 
           if (ZiZ_AllowStairStep) {
              if (currentMarketTrend_HTF == 1 && activeDemand_LTF.isActive) {
-                 ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+                 ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_HTF, activeDemand_LTF, 1, false, "Z-L-Stp-Nor", ReferenceZonePips_LTF);
              }
              if (currentMarketTrend_HTF == -1 && activeSupply_LTF.isActive) {
                  if (!ZiZ_BlockStepSell) {
-                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "ZiZ-Step", ReferenceZonePips_LTF);
+                     ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "Z-L-Stp-Nor", ReferenceZonePips_LTF);
                  }
              }
           }
       }
       
-      // Breakout luôn được phép đánh kể cả khi có Storm
       if (ZiZ_AllowBreakout) {
          double brkEntryDepth = isStorm ? Storm_Entry_Depth : -1.0;
          double brkBuffer = isStorm ? (Storm_Buffer_Pips * 10.0) : -1.0;
+         string zizBrkTag = isStorm ? "Z-L-Brk-Stm" : "Z-L-Brk-Nor";
 
          if (activeFlippedDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "ZiZ-Brk", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
+             ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, zizBrkTag, ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
          }
          if (activeFlippedSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_HTF, activeDemand_LTF, -1, true, "ZiZ-Brk", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
+             ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_HTF, activeDemand_LTF, -1, true, zizBrkTag, ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
          }
       }
       return; 
@@ -460,29 +457,28 @@ void CheckTradeEntry()
       double brkBuffer = isStorm ? (Storm_Buffer_Pips * 10.0) : -1.0;
 
       if (Simple_Trade_HTF) { 
-          // Chỉ đánh Vùng Gốc (Origin) khi sóng bình thường
           if (!isStorm && !isRange) {
               if (Simple_Trend_HTF && activeSupply_HTF.isActive && activeDemand_HTF.isActive) { 
                  
                  if (Enable_FVG_Zones && activeFVGDemand_HTF.isActive && currentMarketTrend_HTF == 1) {
-                     ExecuteEntryLogic(activeFVGDemand_HTF, activeFVGDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "FVG-HTF", ReferenceZonePips_HTF);
+                     ExecuteEntryLogic(activeFVGDemand_HTF, activeFVGDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "S-H-Ori-Nor-FVG", ReferenceZonePips_HTF);
                  }
                  if (Enable_FVG_Zones && activeFVGSupply_HTF.isActive && currentMarketTrend_HTF == -1) {
-                     ExecuteEntryLogic(activeFVGSupply_HTF, activeFVGSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "FVG-HTF", ReferenceZonePips_HTF);
+                     ExecuteEntryLogic(activeFVGSupply_HTF, activeFVGSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "S-H-Ori-Nor-FVG", ReferenceZonePips_HTF);
                  }
 
-                 if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "HTF", ReferenceZonePips_HTF);
-                 else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "HTF", ReferenceZonePips_HTF);
+                 if (currentMarketTrend_HTF == 1) ExecuteEntryLogic(activeDemand_HTF, activeDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, false, "S-H-Ori-Nor", ReferenceZonePips_HTF);
+                 else if (currentMarketTrend_HTF == -1) ExecuteEntryLogic(activeSupply_HTF, activeSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, false, "S-H-Ori-Nor", ReferenceZonePips_HTF);
               }
           }
           
-          // Breakout luôn hoạt động (Được bơm sức mạnh nếu có bão)
           if (Simple_Breakout_HTF) { 
+             string htfBrkTag = isStorm ? "S-H-Brk-Stm" : "S-H-Brk-Nor";
              if (activeFlippedSupply_HTF.isActive && activeSupply_HTF.isActive && activeFlippedSupply_HTF.endTime == 0) 
-                ExecuteEntryLogic(activeFlippedSupply_HTF, activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, "HTF", ReferenceZonePips_HTF, brkEntryDepth, brkBuffer);
+                ExecuteEntryLogic(activeFlippedSupply_HTF, activeFlippedSupply_HTF, activeSupply_HTF, activeDemand_HTF, -1, true, htfBrkTag, ReferenceZonePips_HTF, brkEntryDepth, brkBuffer);
              
              if (activeFlippedDemand_HTF.isActive && activeDemand_HTF.isActive && activeFlippedDemand_HTF.endTime == 0) 
-                ExecuteEntryLogic(activeFlippedDemand_HTF, activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, "HTF", ReferenceZonePips_HTF, brkEntryDepth, brkBuffer);
+                ExecuteEntryLogic(activeFlippedDemand_HTF, activeFlippedDemand_HTF, activeSupply_HTF, activeDemand_HTF, 1, true, htfBrkTag, ReferenceZonePips_HTF, brkEntryDepth, brkBuffer);
           }
       }
 
@@ -496,28 +492,27 @@ void CheckTradeEntry()
               else { allowBuys = false; allowSells = false; }
           }
           
-          // Chỉ đánh Vùng Gốc (Origin) khi sóng bình thường
           if (!isStorm && !isRange) {
               if (Simple_Trend_LTF && activeSupply_LTF.isActive && activeDemand_LTF.isActive) { 
                  if (Enable_FVG_Zones && activeFVGDemand_LTF.isActive && currentMarketTrend_LTF == 1 && allowBuys) {
-                     ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "FVG-LTF", ReferenceZonePips_LTF);
+                     ExecuteEntryLogic(activeFVGDemand_LTF, activeFVGDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "S-L-Ori-Nor-FVG", ReferenceZonePips_LTF);
                  }
                  if (Enable_FVG_Zones && activeFVGSupply_LTF.isActive && currentMarketTrend_LTF == -1 && allowSells) {
-                     ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "FVG-LTF", ReferenceZonePips_LTF);
+                     ExecuteEntryLogic(activeFVGSupply_LTF, activeFVGSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "S-L-Ori-Nor-FVG", ReferenceZonePips_LTF);
                  }
                  
-                 if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "LTF", ReferenceZonePips_LTF);
-                 else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "LTF", ReferenceZonePips_LTF);
+                 if (currentMarketTrend_LTF == 1 && allowBuys) ExecuteEntryLogic(activeDemand_LTF, activeDemand_LTF, activeSupply_LTF, activeDemand_LTF, 1, false, "S-L-Ori-Nor", ReferenceZonePips_LTF);
+                 else if (currentMarketTrend_LTF == -1 && allowSells) ExecuteEntryLogic(activeSupply_LTF, activeSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, false, "S-L-Ori-Nor", ReferenceZonePips_LTF);
               }
           }
           
-          // Breakout luôn hoạt động (Được bơm sức mạnh nếu có bão)
           if (Simple_Breakout_LTF) { 
+             string ltfBrkTag = isStorm ? "S-L-Brk-Stm" : "S-L-Brk-Nor";
              if (activeFlippedSupply_LTF.isActive && activeSupply_LTF.isActive && activeFlippedSupply_LTF.endTime == 0) {
-                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, "LTF", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
+                if (allowSells) ExecuteEntryLogic(activeFlippedSupply_LTF, activeFlippedSupply_LTF, activeSupply_LTF, activeDemand_HTF, -1, true, ltfBrkTag, ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
              }
              if (activeFlippedDemand_LTF.isActive && activeDemand_LTF.isActive && activeFlippedDemand_LTF.endTime == 0) {
-                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, "LTF", ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
+                if (allowBuys) ExecuteEntryLogic(activeFlippedDemand_LTF, activeFlippedDemand_LTF, activeSupply_LTF, activeDemand_HTF, 1, true, ltfBrkTag, ReferenceZonePips_LTF, brkEntryDepth, brkBuffer);
              }
           }
       }
@@ -562,7 +557,7 @@ void ManageOpenPositions() {
           }
       }
 
-      bool isH1Target = (StringFind(comment, "Swing") >= 0 || StringFind(comment, "HTF") >= 0 || StringFind(comment, "Step") >= 0);
+      bool isH1Target = (StringFind(comment, "-H-") >= 0 || StringFind(comment, "Swg") >= 0 || StringFind(comment, "Stp") >= 0);
       bool trailMoved = false;
 
       if (Enable_Smart_Trail && isH1Target) {
@@ -592,7 +587,7 @@ void ManageOpenPositions() {
          double activeTriggerPct = LockTriggerPercent;
          double activeLockPct    = LockPositionPercent; 
          
-         if (StringFind(comment, "Step") >= 0) {
+         if (StringFind(comment, "Stp") >= 0) {
              activeTriggerPct = Step_LockTriggerPercent;
              activeLockPct    = Step_LockPositionPercent; 
          }
@@ -619,7 +614,7 @@ void ManageOpenPositions() {
       }
       
       if (!trailMoved && Enable_RR_Locking) {
-         if (RR_Lock_Step_Only && StringFind(comment, "Step") < 0) { } 
+         if (RR_Lock_Step_Only && StringFind(comment, "Stp") < 0) { } 
          else {
             double newSL_RR = 0;
             if (type == POSITION_TYPE_BUY) {
@@ -750,45 +745,27 @@ void ExportTransactionsToCSV()
          
          if(type == DEAL_TYPE_BUY || type == DEAL_TYPE_SELL) 
          {
-            string sType = (type == DEAL_TYPE_BUY) ?
-                        "Buy" : "Sell";
+            string sType = (type == DEAL_TYPE_BUY) ? "Buy" : "Sell";
             string rawComment = HistoryDealGetString(ticket_deal, DEAL_COMMENT);
             
-            // --- CẬP NHẬT: SẮP XẾP LẠI THỨ TỰ ƯU TIÊN PHÂN LOẠI LỆNH ---
+            // --- CẬP NHẬT: TRÍCH XUẤT TAG TỰ ĐỘNG CHUẨN NAMING CONVENTION V2 ---
             string strategyType = "OTHER";
-            // 1. STORM & RANGE (Đặc nhiệm thời tiết - Ưu tiên bắt trước)
-            if (StringFind(rawComment, "Storm") >= 0) strategyType = "STORM-MODE";
-            else if (StringFind(rawComment, "Range") >= 0) strategyType = "RANGE-FADE";
-            
-            // 2. FVG (Khoảng trống giá)
-            else if (StringFind(rawComment, "FVG-Swing") >= 0) strategyType = "FVG-SWING";
-            else if (StringFind(rawComment, "FVG-HTF") >= 0) strategyType = "FVG-HTF";
-            else if (StringFind(rawComment, "FVG-LTF") >= 0) strategyType = "FVG-LTF";
-            
-            // 3. BREAKOUT (Vùng Xám)
-            else if (StringFind(rawComment, "Brk HTF") >= 0) strategyType = "HTF-BREAKOUT";
-            else if (StringFind(rawComment, "Brk LTF") >= 0) strategyType = "LTF-BREAKOUT";
-            else if (StringFind(rawComment, "Brk ZiZ") >= 0) strategyType = "ZIZ-BREAKOUT";
-            else if (StringFind(rawComment, "Brk") >= 0) strategyType = "BREAKOUT"; 
-            
-            // 4. ZIZ (Nhồi lệnh trong hộp)
-            else if (StringFind(rawComment, "ZiZ-Swing") >= 0) strategyType = "ZIZ-SWING";
-            else if (StringFind(rawComment, "ZiZ-Step") >= 0) strategyType = "ZIZ-STEP";
-            else if (StringFind(rawComment, "ZiZ-Scalp") >= 0) strategyType = "ZIZ-SCALP";
-            
-            // 5. SIMPLE ORIGIN (Vùng Gốc - Tên ngắn nhất nên phải đặt cuối cùng)
-            else if (StringFind(rawComment, "HTF") >= 0) strategyType = "HTF-SIMPLE";
-            else if (StringFind(rawComment, "LTF") >= 0) strategyType = "LTF-SIMPLE";
-            // -------------------------------------------------------------
+            int spaceIdx = StringFind(rawComment, " [H:");
+            if (spaceIdx > 0) {
+                strategyType = StringSubstr(rawComment, 0, spaceIdx); // Cắt lấy đúng phần Mật danh (VD: S-H-Brk-Stm)
+            } else {
+                strategyType = rawComment; // Dành cho các lệnh tay hoặc lỗi
+            }
+            // ------------------------------------------------------------------
             
             string h1_trend = "N/A";
             string m15_trend = "N/A";
             int startIdx = StringFind(rawComment, "[H:");
             if (startIdx >= 0) {
                string sub = StringSubstr(rawComment, startIdx + 3);
-               int spaceIdx = StringFind(sub, " ");
-               if (spaceIdx > 0) {
-                   h1_trend = StringSubstr(sub, 0, spaceIdx);
+               int spaceIdxTrend = StringFind(sub, " ");
+               if (spaceIdxTrend > 0) {
+                   h1_trend = StringSubstr(sub, 0, spaceIdxTrend);
                    int m15Idx = StringFind(sub, "M:");
                    if (m15Idx > 0) {
                        string sub2 = StringSubstr(sub, m15Idx + 2);
@@ -825,18 +802,16 @@ void ExportTransactionsToCSV()
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_VOLUME), 2),
                DoubleToString(HistoryDealGetDouble(ticket_deal, DEAL_PRICE), 5),
                DoubleToString(rawProfit, 2),
-   
-                            DoubleToString(comm, 2),    
+               DoubleToString(comm, 2),    
                DoubleToString(swap, 2),    
                DoubleToString(netProfit, 2), 
                DoubleToString(historicalADR, 1), 
                strategyType, 
-             
-                rawComment, 
+               rawComment, 
                h1_trend,   
                m15_trend   
             );
-      }
+         }
       }
       
       if (MQLInfoInteger(MQL_TESTER)) {
@@ -869,7 +844,6 @@ void ExportTransactionsToCSV()
                           if (CopyHigh(_Symbol, PERIOD_D1, shift + 1, ADR_Period, hBuf) == ADR_Period &&
                               CopyLow(_Symbol, PERIOD_D1, shift + 1, ADR_Period, lBuf) == ADR_Period) {
                               
-                     
                                 double sumPips = 0;
                                 for(int j = 0; j < ADR_Period; j++) {
                                   sumPips += (hBuf[j] - lBuf[j]) / point;
@@ -887,7 +861,6 @@ void ExportTransactionsToCSV()
           }
           
           if (totalDays > 0) {
-            
               FileWrite(file_handle, "Period Analyzed", TimeToString(startTest) + " to " + TimeToString(endTest));
               FileWrite(file_handle, "Total Days Analyzed", (string)totalDays);
               FileWrite(file_handle, "Zone", "Count", "Percent");
