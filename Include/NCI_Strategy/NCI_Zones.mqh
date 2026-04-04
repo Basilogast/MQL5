@@ -139,8 +139,9 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
    int count = ArraySize(points);
    if (count == 0) return; 
    
-   MergedZoneState supply; supply.isActive = false; 
-   MergedZoneState demand; demand.isActive = false;
+   // --- MEMORY CACHE CỦA TỪNG HỘP ---
+   MergedZoneState supply; supply.isActive = false; int supplyTrend = 0;
+   MergedZoneState demand; demand.isActive = false; int demandTrend = 0;
    MergedZoneState fvgSupply; fvgSupply.isActive = false;
    MergedZoneState fvgDemand; fvgDemand.isActive = false;
 
@@ -151,6 +152,7 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
       if (p.type == 1) { // SUPPLY
          if (!supply.isActive) {
              StartZone(supply, p);
+             supplyTrend = p.assignedTrend; // Ghi nhớ giấy khai sinh
              if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time;
              } 
              else { fvgSupply.isActive = false;
@@ -172,8 +174,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                if (fvgSupply.isActive) { DrawFVGZone(suffix, fvgSupply.startTime, preciseBreakTime, fvgSupply.top, fvgSupply.bottom, 1, i-1); fvgSupply.isActive = false;
                }
                
-               // [MINIMAL FIX 1]: Chỉ lật Vùng Đỏ (Supply) thành Vùng Xám khi Trend Đang DOWN
-               if (p.assignedTrend == -1) { 
+               // [MINIMAL FIX 1]: Dùng Giấy Khai Sinh thay vì Trend của Nến mới
+               if (supplyTrend == -1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
@@ -203,6 +205,7 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                    }
                }
                StartZone(supply, p);
+               supplyTrend = p.assignedTrend; // Cấp giấy khai sinh mới
                if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop; fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time;
                } 
                else { fvgSupply.isActive = false;
@@ -224,6 +227,7 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                   DrawSingleZone(suffix, supply.startTime, p.time, supply.top, supply.bottom, 1, i-1);
                   if (fvgSupply.isActive) DrawFVGZone(suffix, fvgSupply.startTime, p.time, fvgSupply.top, fvgSupply.bottom, 1, i-1);
                   StartZone(supply, p); 
+                  supplyTrend = p.assignedTrend; // Cấp giấy khai sinh mới
                   if (p.hasFVG) { fvgSupply.isActive = true; fvgSupply.top = p.fvgTop;
                   fvgSupply.bottom = p.fvgBottom; fvgSupply.startTime = p.time; } 
                   else { fvgSupply.isActive = false;
@@ -235,6 +239,7 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
       else if (p.type == -1) { // DEMAND
          if (!demand.isActive) {
              StartZone(demand, p);
+             demandTrend = p.assignedTrend; // Ghi nhớ giấy khai sinh
              if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time;
              } 
              else { fvgDemand.isActive = false;
@@ -256,8 +261,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                if (fvgDemand.isActive) { DrawFVGZone(suffix, fvgDemand.startTime, preciseBreakTime, fvgDemand.top, fvgDemand.bottom, -1, i-1); fvgDemand.isActive = false;
                }
 
-               // [MINIMAL FIX 2]: Chỉ lật Vùng Xanh (Demand) thành Vùng Xám khi Trend Đang UP
-               if (p.assignedTrend == 1) { 
+               // [MINIMAL FIX 2]: Dùng Giấy Khai Sinh thay vì Trend của Nến mới
+               if (demandTrend == 1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
@@ -287,6 +292,7 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                    }
                }
                StartZone(demand, p);
+               demandTrend = p.assignedTrend; // Cấp giấy khai sinh mới
                if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop; fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time;
                } 
                else { fvgDemand.isActive = false;
@@ -308,6 +314,7 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                   DrawSingleZone(suffix, demand.startTime, p.time, demand.top, demand.bottom, -1, i-1);
                   if (fvgDemand.isActive) DrawFVGZone(suffix, fvgDemand.startTime, p.time, fvgDemand.top, fvgDemand.bottom, -1, i-1);
                   StartZone(demand, p); 
+                  demandTrend = p.assignedTrend; // Cấp giấy khai sinh mới
                   if (p.hasFVG) { fvgDemand.isActive = true; fvgDemand.top = p.fvgTop;
                   fvgDemand.bottom = p.fvgBottom; fvgDemand.startTime = p.time; } 
                   else { fvgDemand.isActive = false;
@@ -349,9 +356,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
              activeFlipSup.isActive = false;
          }
 
-         // [MINIMAL FIX 3]: LIVE EDGE SUPPLY - Kiểm tra Trend hiện tại
-         int currentTrend = (suffix == "_HTF") ? currentMarketTrend_HTF : currentMarketTrend_LTF;
-         if (currentTrend == -1) {
+         // [MINIMAL FIX 3]: LIVE EDGE SUPPLY - Kiểm tra Giấy Khai Sinh của Hộp
+         if (supplyTrend == -1) {
              MergedZoneState flip = supply;
              flip.isActive = true;
              flip.startTime = deadTime;
@@ -362,10 +368,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
              activeFlipDem = flip;
              if (deathTime == 0) {
                  activeFlipDem.endTime = 0;
-                 DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
              } else {
                  activeFlipDem.endTime = deathTime;
-                 DrawFlippedZone(suffix, flip, deathTime); 
              }
          }
       }
@@ -402,9 +406,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
              activeFlipSup.isActive = false;
          }
 
-         // [MINIMAL FIX 4]: LIVE EDGE DEMAND - Kiểm tra Trend hiện tại
-         int currentTrend = (suffix == "_HTF") ? currentMarketTrend_HTF : currentMarketTrend_LTF;
-         if (currentTrend == 1) {
+         // [MINIMAL FIX 4]: LIVE EDGE DEMAND - Kiểm tra Giấy Khai Sinh của Hộp
+         if (demandTrend == 1) {
              MergedZoneState flip = demand;
              flip.isActive = true;
              flip.startTime = deadTime;
@@ -415,28 +418,50 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
              activeFlipSup = flip;
              if (deathTime == 0) {
                  activeFlipSup.endTime = 0;
-                 DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
              } else {
                  activeFlipSup.endTime = deathTime;
-                 DrawFlippedZone(suffix, flip, deathTime); 
              }
          }
       }
    }
+
+   // --- FIX LOGIC DỌN RÁC VÙNG XÁM (CAPPED, NOT DELETED) ---
+   if (activeFlipSup.isActive && activeFlipSup.endTime == 0) { 
+      int startBar = iBarShift(_Symbol, tf, activeFlipSup.startTime);
+      datetime deadTime = FindBreakoutTime(tf, startBar, 0, activeFlipSup.top, 1);
+      if (deadTime > 0) { 
+         activeFlipSup.endTime = deadTime; 
+      }
+   }
+   if (activeFlipDem.isActive && activeFlipDem.endTime == 0) { 
+      int startBar = iBarShift(_Symbol, tf, activeFlipDem.startTime);
+      datetime deadTime = FindBreakoutTime(tf, startBar, 0, activeFlipDem.bottom, -1);
+      if (deadTime > 0) { 
+         activeFlipDem.endTime = deadTime; 
+      }
+   }
    
+   // --- VẼ CÁC VÙNG CÒN SỐNG TRÊN LIVE EDGE ---
    if (supply.isActive) DrawSingleZone(suffix, supply.startTime, TimeCurrent()+PeriodSeconds(tf)*50, supply.top, supply.bottom, 1, 999991);
    if (demand.isActive) DrawSingleZone(suffix, demand.startTime, TimeCurrent()+PeriodSeconds(tf)*50, demand.top, demand.bottom, -1, 999992); 
    
    if (fvgSupply.isActive) DrawFVGZone(suffix, fvgSupply.startTime, TimeCurrent()+PeriodSeconds(tf)*50, fvgSupply.top, fvgSupply.bottom, 1, 999993);
    if (fvgDemand.isActive) DrawFVGZone(suffix, fvgDemand.startTime, TimeCurrent()+PeriodSeconds(tf)*50, fvgDemand.top, fvgDemand.bottom, -1, 999994);
 
+   if (activeFlipSup.isActive) DrawFlippedZone(suffix, activeFlipSup, (activeFlipSup.endTime == 0) ? TimeCurrent()+PeriodSeconds(tf)*50 : activeFlipSup.endTime);
+   if (activeFlipDem.isActive) DrawFlippedZone(suffix, activeFlipDem, (activeFlipDem.endTime == 0) ? TimeCurrent()+PeriodSeconds(tf)*50 : activeFlipDem.endTime);
+
    // --- DATA BRIDGE FIX: FORCE SYNC TO GLOBAL VARIABLES ---
    if (suffix == "_HTF") {
        activeFVGSupply_HTF = fvgSupply;
        activeFVGDemand_HTF = fvgDemand;
+       activeFlippedSupply_HTF = activeFlipSup; 
+       activeFlippedDemand_HTF = activeFlipDem; 
    } else if (suffix == "_LTF") {
        activeFVGSupply_LTF = fvgSupply;
        activeFVGDemand_LTF = fvgDemand;
+       activeFlippedSupply_LTF = activeFlipSup; 
+       activeFlippedDemand_LTF = activeFlipDem; 
    }
    
    activeSup = supply;
