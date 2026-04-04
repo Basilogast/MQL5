@@ -172,7 +172,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                if (fvgSupply.isActive) { DrawFVGZone(suffix, fvgSupply.startTime, preciseBreakTime, fvgSupply.top, fvgSupply.bottom, 1, i-1); fvgSupply.isActive = false;
                }
                
-               if (Use_Strict_SMC_Zones || p.assignedTrend != 1) { 
+               // [MINIMAL FIX 1]: Chỉ lật Vùng Đỏ (Supply) thành Vùng Xám khi Trend Đang DOWN (Cản Mạnh)
+               if (p.assignedTrend == -1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
@@ -256,7 +257,8 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
                if (fvgDemand.isActive) { DrawFVGZone(suffix, fvgDemand.startTime, preciseBreakTime, fvgDemand.top, fvgDemand.bottom, -1, i-1); fvgDemand.isActive = false;
                }
 
-               if (Use_Strict_SMC_Zones || p.assignedTrend != -1) { 
+               // [MINIMAL FIX 2]: Chỉ lật Vùng Xanh (Demand) thành Vùng Xám khi Trend Đang UP (Cản Mạnh)
+               if (p.assignedTrend == 1) { 
                    if (activeFlipDem.isActive) {
                        datetime end = preciseBreakTime;
                        if (activeFlipDem.endTime > 0 && activeFlipDem.endTime < preciseBreakTime) end = activeFlipDem.endTime;
@@ -348,20 +350,24 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
              activeFlipSup.isActive = false;
          }
 
-         MergedZoneState flip = supply;
-         flip.isActive = true;
-         flip.startTime = deadTime;
-         int breakBar = iBarShift(_Symbol, tf, deadTime);
-         double futureTarget = FindFutureTarget(points, count-1, 1, supply.top);
-         datetime deathTime = CheckZoneLife(tf, breakBar, 1, futureTarget, supply.bottom, true);
-         
-         activeFlipDem = flip;
-         if (deathTime == 0) {
-             activeFlipDem.endTime = 0;
-             DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
-         } else {
-             activeFlipDem.endTime = deathTime;
-             DrawFlippedZone(suffix, flip, deathTime); 
+         // [MINIMAL FIX 3]: LIVE EDGE SUPPLY - Kiểm tra Trend hiện tại
+         int currentTrend = (suffix == "_HTF") ? currentMarketTrend_HTF : currentMarketTrend_LTF;
+         if (currentTrend == -1) {
+             MergedZoneState flip = supply;
+             flip.isActive = true;
+             flip.startTime = deadTime;
+             int breakBar = iBarShift(_Symbol, tf, deadTime);
+             double futureTarget = FindFutureTarget(points, count-1, 1, supply.top);
+             datetime deathTime = CheckZoneLife(tf, breakBar, 1, futureTarget, supply.bottom, true);
+             
+             activeFlipDem = flip;
+             if (deathTime == 0) {
+                 activeFlipDem.endTime = 0;
+                 DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
+             } else {
+                 activeFlipDem.endTime = deathTime;
+                 DrawFlippedZone(suffix, flip, deathTime); 
+             }
          }
       }
    }
@@ -397,20 +403,24 @@ void DrawParallelZones(ENUM_TIMEFRAMES tf, PointStruct &points[], MergedZoneStat
              activeFlipSup.isActive = false;
          }
 
-         MergedZoneState flip = demand;
-         flip.isActive = true;
-         flip.startTime = deadTime;
-         int breakBar = iBarShift(_Symbol, tf, deadTime);
-         double futureTarget = FindFutureTarget(points, count-1, -1, demand.bottom);
-         datetime deathTime = CheckZoneLife(tf, breakBar, -1, futureTarget, demand.top, true);
-         
-         activeFlipSup = flip;
-         if (deathTime == 0) {
-             activeFlipSup.endTime = 0;
-             DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
-         } else {
-             activeFlipSup.endTime = deathTime;
-             DrawFlippedZone(suffix, flip, deathTime); 
+         // [MINIMAL FIX 4]: LIVE EDGE DEMAND - Kiểm tra Trend hiện tại
+         int currentTrend = (suffix == "_HTF") ? currentMarketTrend_HTF : currentMarketTrend_LTF;
+         if (currentTrend == 1) {
+             MergedZoneState flip = demand;
+             flip.isActive = true;
+             flip.startTime = deadTime;
+             int breakBar = iBarShift(_Symbol, tf, deadTime);
+             double futureTarget = FindFutureTarget(points, count-1, -1, demand.bottom);
+             datetime deathTime = CheckZoneLife(tf, breakBar, -1, futureTarget, demand.top, true);
+             
+             activeFlipSup = flip;
+             if (deathTime == 0) {
+                 activeFlipSup.endTime = 0;
+                 DrawFlippedZone(suffix, flip, TimeCurrent()+PeriodSeconds(tf)*50); 
+             } else {
+                 activeFlipSup.endTime = deathTime;
+                 DrawFlippedZone(suffix, flip, deathTime); 
+             }
          }
       }
    }
