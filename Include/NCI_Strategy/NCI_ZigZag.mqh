@@ -255,72 +255,24 @@ void UpdateZigZagMap(ENUM_TIMEFRAMES tf, PointStruct &targetPoints[], int &targe
    int startBar = MathMin(HistoryBars, totalBars - 10);
    for (int i = startBar; i >= 5; i--) { 
       if (IsGreen(tf, i)) { 
-         int c1=i-1;
-         int c2=i-2; 
-         if(IsRed(tf, c1)){ 
-            if(IsStrongBody(tf, c1)){ 
-               bool confirm = false;
-               if(IsRed(tf, c2)) confirm = true; 
-               else if(GetClose(tf, c2) < GetOpen(tf, i)) confirm = true;
-               if(confirm) { 
-                  ArrayResize(Alarms,alarmCount+1);
-                  Alarms[alarmCount].price=GetHigh(tf, i); 
-                  Alarms[alarmCount].time=GetTime(tf, i); 
-                  Alarms[alarmCount].type=1; 
-                  Alarms[alarmCount].barIndex=i; 
-                  alarmCount++; 
-               } 
-            } else { 
-               double rl=GetLow(tf, c1);
-               for(int k=1;k<=MaxScanDistance;k++){ 
-                  int n=c1-k;
-                  if(n<0||GetHigh(tf, n)>GetHigh(tf, i))break; 
-                  if(IsRed(tf, n)&&IsStrongBody(tf, n)&&GetClose(tf, n)<rl){ 
-                     ArrayResize(Alarms,alarmCount+1);
-                     Alarms[alarmCount].price=GetHigh(tf, i); 
-                     Alarms[alarmCount].time=GetTime(tf, i); 
-                     Alarms[alarmCount].type=1; 
-                     Alarms[alarmCount].barIndex=i; 
-                     alarmCount++; 
-                     break; 
-                  } 
-               } 
-            } 
-         } 
+         if (CheckForPullback(tf, i, 1)) {
+            ArrayResize(Alarms,alarmCount+1);
+            Alarms[alarmCount].price=GetHigh(tf, i); 
+            Alarms[alarmCount].time=GetTime(tf, i); 
+            Alarms[alarmCount].type=1; 
+            Alarms[alarmCount].barIndex=i; 
+            alarmCount++; 
+         }
       } 
       if (IsRed(tf, i)) { 
-         int c1=i-1;
-         int c2=i-2; 
-         if(IsGreen(tf, c1)){ 
-            if(IsStrongBody(tf, c1)){ 
-               bool confirm = false;
-               if(IsGreen(tf, c2)) confirm = true; 
-               else if(GetClose(tf, c2) > GetOpen(tf, i)) confirm = true;
-               if(confirm) { 
-                  ArrayResize(Alarms,alarmCount+1);
-                  Alarms[alarmCount].price=GetLow(tf, i); 
-                  Alarms[alarmCount].time=GetTime(tf, i); 
-                  Alarms[alarmCount].type=-1; 
-                  Alarms[alarmCount].barIndex=i; 
-                  alarmCount++; 
-               } 
-            } else { 
-               double rh=GetHigh(tf, c1);
-               for(int k=1;k<=MaxScanDistance;k++){ 
-                  int n=c1-k;
-                  if(n<0||GetLow(tf, n)<GetLow(tf, i))break; 
-                  if(IsGreen(tf, n)&&IsStrongBody(tf, n)&&GetClose(tf, n)>rh){ 
-                     ArrayResize(Alarms,alarmCount+1);
-                     Alarms[alarmCount].price=GetLow(tf, i); 
-                     Alarms[alarmCount].time=GetTime(tf, i); 
-                     Alarms[alarmCount].type=-1; 
-                     Alarms[alarmCount].barIndex=i; 
-                     alarmCount++; 
-                     break; 
-                  } 
-               } 
-            } 
-         } 
+         if (CheckForPullback(tf, i, -1)) {
+            ArrayResize(Alarms,alarmCount+1);
+            Alarms[alarmCount].price=GetLow(tf, i); 
+            Alarms[alarmCount].time=GetTime(tf, i); 
+            Alarms[alarmCount].type=-1; 
+            Alarms[alarmCount].barIndex=i; 
+            alarmCount++; 
+         }
       } 
    } 
    if (alarmCount < 2) return;

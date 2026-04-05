@@ -184,3 +184,45 @@ datetime FindBreakoutTime(ENUM_TIMEFRAMES tf, int startBar, int endBar, double l
    }
    return 0;
 }
+
+// *** PULLBACK HELPER (Timeframe Aware) ***
+bool CheckForPullback(ENUM_TIMEFRAMES tf, int i, int type) {
+   int c1 = i - 1;
+   int c2 = i - 2;
+   
+   if (type == 1) { // Check Pullback DOWN (from a High/Green candle)
+      if (IsRed(tf, c1)) {
+         if (IsStrongBody(tf, c1)) {
+            if (IsRed(tf, c2)) return true;
+            if (GetClose(tf, c2) < GetOpen(tf, i)) return true;
+         } else {
+            double rl = GetLow(tf, c1);
+            for (int k = 1; k <= MaxScanDistance; k++) {
+               int n = c1 - k;
+               if (n < 0 || GetHigh(tf, n) > GetHigh(tf, i)) break;
+               if (IsRed(tf, n) && IsStrongBody(tf, n) && GetClose(tf, n) < rl) {
+                  return true;
+               }
+            }
+         }
+      }
+   } 
+   else if (type == -1) { // Check Pullback UP (from a Low/Red candle)
+      if (IsGreen(tf, c1)) {
+         if (IsStrongBody(tf, c1)) {
+            if (IsGreen(tf, c2)) return true;
+            if (GetClose(tf, c2) > GetOpen(tf, i)) return true;
+         } else {
+            double rh = GetHigh(tf, c1);
+            for (int k = 1; k <= MaxScanDistance; k++) {
+               int n = c1 - k;
+               if (n < 0 || GetLow(tf, n) < GetLow(tf, i)) break;
+               if (IsGreen(tf, n) && IsStrongBody(tf, n) && GetClose(tf, n) > rh) {
+                  return true;
+               }
+            }
+         }
+      }
+   }
+   return false;
+}
